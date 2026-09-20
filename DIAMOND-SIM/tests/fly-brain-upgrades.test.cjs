@@ -148,10 +148,18 @@ test("flies sharing one connectome keep separate heading and metabolic registers
   const env = {
     agent1X: 2, agent1Y: 2, agent1Energy: 24,
     agent2X: 8, agent2Y: 18, agent2Energy: 156,
-    agent3X: 19, agent3Y: 1, agent3Energy: 100
+    agent3X: 19, agent3Y: 1, agent3Energy: 100,
+    gridSize: 20
   };
   const graft = new MultiAgentGraphGraft(new SixteenFlyBrainSyncytium(5), 0.55);
   for (let t = 0; t < 4; t++) {
+    // Each fly travels in its own direction, so each integrates a different
+    // angular velocity. Heading comes from motion, so a static world would
+    // leave all three pointing the same way.
+    env.agent1X = Math.min(19, env.agent1X + 1);
+    env.agent2Y = Math.max(0, env.agent2Y - 1);
+    env.agent3X = Math.max(0, env.agent3X - 1);
+    env.agent3Y = Math.min(19, env.agent3Y + 1);
     graft.resolveAgents(env, OBS(0.1, 0.1, 0.2), OBS(0.4, 0.9, 1.3), OBS(0.95, 0.05, 0.8));
   }
 
@@ -602,4 +610,136 @@ test("the legacy flat consensus publishes no gains", () => {
   legacy.step(OBS(0.5, 0.5), 0, 0, 100);
   assert.equal(legacy.lastDescendingGains, null);
   assert.equal(legacy.config.consensus, "flat");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Heading, legal moves and social refractory
+// ─────────────────────────────────────────────────────────────────────────────
+function walkingEnv() {
+  return {
+    agent1X: 10, agent1Y: 10, agent1Energy: 120,
+    agent2X: 4, agent2Y: 15, agent2Energy: 120,
+    agent3X: 16, agent3Y: 5, agent3Energy: 120,
+    gridSize: 20
+  };
+}
+
+test("heading comes from where the fly went, not from where it sits in the world", () => {
+  const graft = new MultiAgentGraphGraft(new SixteenFlyBrainSyncytium(12), 0.55);
+  const env = walkingEnv();
+  graft.resolveAgents(env, OBS(0.5, 0.5), OBS(0.2, 0.75), OBS(0.8, 0.25));
+
+  // Walk east; heading must read east regardless of which half of the grid the
+  // fly is standing in.
+  for (let t = 0; t < 3; t++) {
+    env.agent1X += 1;
+    graft.resolveAgents(env, OBS(env.agent1X / 20, 0.5), OBS(0.2, 0.75), OBS(0.8, 0.25));
+  }
+  assert.ok(Math.abs(angleDelta(graft.agent1.lastHeading, 0)) < 1e-6, "eastward travel reads as heading 0");
+
+  // Now walk west from the same place.
+  for (let t = 0; t < 3; t++) {
+    env.agent1X -= 1;
+    graft.resolveAgents(env, OBS(env.agent1X / 20, 0.5), OBS(0.2, 0.75), OBS(0.8, 0.25));
+  }
+  assert.ok(
+    Math.abs(angleDelta(graft.agent1.lastHeading, Math.PI)) < 1e-6,
+    "westward travel reads as heading pi"
+  );
+});
+
+test("a fly that did not move keeps the heading it had", () => {
+  const graft = new MultiAgentGraphGraft(new SixteenFlyBrainSyncytium(12), 0.55);
+  const env = walkingEnv();
+  graft.resolveAgents(env, OBS(0.5, 0.5), OBS(0.2, 0.75), OBS(0.8, 0.25));
+  env.agent1Y -= 1;
+  graft.resolveAgents(env, OBS(0.5, 0.45), OBS(0.2, 0.75), OBS(0.8, 0.25));
+  const held = graft.agent1.lastHeading;
+
+  graft.resolveAgents(env, OBS(0.5, 0.45), OBS(0.2, 0.75), OBS(0.8, 0.25));
+  assert.equal(graft.agent1.lastHeading, held, "standing still is not a turn");
+});
+
+test("with grid bounds the chosen action never walks into a wall", () => {
+  const graft = new MultiAgentGraphGraft(new SixteenFlyBrainSyncytium(15), 0.55);
+  // Every fly pinned into a different corner: only two of four moves are legal.
+  const env = {
+    agent1X: 0, agent1Y: 0, agent1Energy: 120,
+    agent2X: 19, agent2Y: 19, agent2Energy: 120,
+    agent3X: 0, agent3Y: 19, agent3Energy: 120,
+    gridSize: 20
+  };
+  const deltas = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+  for (let t = 0; t < 12; t++) {
+    const result = graft.resolveAgents(env, OBS(0.02, 0.02), OBS(0.98, 0.98), OBS(0.02, 0.98));
+    for (const [key, state] of [["agent1", result.agent1], ["agent2", result.agent2], ["agent3", result.agent3]]) {
+      const [dx, dy] = deltas[state.action];
+      const nx = env[`${key}X`] + dx;
+      const ny = env[`${key}Y`] + dy;
+      assert.ok(
+        nx >= 0 && nx < 20 && ny >= 0 && ny < 20,
+        `${key} at (${env[`${key}X`]},${env[`${key}Y`]}) chose ${state.action}, which leaves the grid`
+      );
+      env[`${key}X`] = nx;
+      env[`${key}Y`] = ny;
+    }
+  }
+});
+
+test("without bounds the caller keeps the previous behaviour", () => {
+  const graft = new MultiAgentGraphGraft(new SixteenFlyBrainSyncytium(15), 0.55);
+  const env = { agent1X: 0, agent1Y: 0, agent1Energy: 120, agent2X: 5, agent2Y: 5, agent2Energy: 120 };
+  const result = graft.resolveAgents(env, OBS(0.02, 0.02), OBS(0.25, 0.25));
+  assert.ok(["up", "down", "left", "right"].includes(result.agent1.action));
+});
+
+test("social resonance pays once, then goes refractory", () => {
+  const graft = new MultiAgentGraphGraft(new SixteenFlyBrainSyncytium(4), 0.55);
+  // Three flies parked on top of each other: permanently in range.
+  const env = {
+    agent1X: 10, agent1Y: 10, agent1Energy: 100,
+    agent2X: 11, agent2Y: 10, agent2Energy: 100,
+    agent3X: 10, agent3Y: 11, agent3Energy: 100,
+    gridSize: 20
+  };
+  let paid = 0;
+  let inRange = 0;
+  const ticks = graft.socialRefractory * 3;
+  for (let t = 0; t < ticks; t++) {
+    // Hold them in place so proximity never lapses.
+    env.agent1X = 10; env.agent1Y = 10;
+    env.agent2X = 11; env.agent2Y = 10;
+    env.agent3X = 10; env.agent3Y = 11;
+    const result = graft.resolveAgents(env, OBS(0.5, 0.5), OBS(0.55, 0.5), OBS(0.5, 0.55));
+    if (result.isTriSwarmInRange) inRange++;
+    if (result.isTriSwarmResonance) paid++;
+  }
+
+  assert.equal(inRange, ticks, "the cluster is in range on every tick");
+  assert.ok(paid >= 2 && paid <= 4, `bonus should fire a few times in ${ticks} ticks, fired ${paid}`);
+
+  // The whole point: huddling must not out-earn moving. Metabolic cost is one
+  // energy per tick, so the average payout has to be below that.
+  const perTick = (paid * graft.triSwarmEnergy) / ticks;
+  assert.ok(perTick < 1, `social payout averaged ${perTick.toFixed(2)} per tick, which beats the step cost`);
+});
+
+test("proximity and payment are reported separately", () => {
+  const graft = new MultiAgentGraphGraft(new SixteenFlyBrainSyncytium(4), 0.55);
+  const env = {
+    agent1X: 10, agent1Y: 10, agent1Energy: 100,
+    agent2X: 11, agent2Y: 10, agent2Energy: 100,
+    agent3X: 10, agent3Y: 11, agent3Energy: 100,
+    gridSize: 20
+  };
+  const first = graft.resolveAgents(env, OBS(0.5, 0.5), OBS(0.55, 0.5), OBS(0.5, 0.55));
+  assert.equal(first.isTriSwarmResonance, true);
+  assert.equal(first.isTriSwarmInRange, true);
+
+  env.agent1X = 10; env.agent1Y = 10;
+  env.agent2X = 11; env.agent2Y = 10;
+  env.agent3X = 10; env.agent3Y = 11;
+  const second = graft.resolveAgents(env, OBS(0.5, 0.5), OBS(0.55, 0.5), OBS(0.5, 0.55));
+  assert.equal(second.isTriSwarmResonance, false, "no second payout inside the refractory window");
+  assert.equal(second.isTriSwarmInRange, true, "but the cluster is still a cluster");
 });

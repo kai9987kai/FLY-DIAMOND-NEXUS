@@ -1766,11 +1766,90 @@
 
       this.stasisThreshold = 4; // Stagnation hazard triggers after 4 still ticks
       this.stasisEnergyDrain = 8;
+
+      /**
+       * Social signalling has a refractory period, and its energy payoff is
+       * smaller than the cost of the ticks it takes. Paid every tick, huddling
+       * beat foraging: three agents within range gained more energy than moving
+       * costs, so the swarm settled into a corner and farmed the bonus while
+       * the diamonds went uncollected. Wing song is a signal, not a meal.
+       */
+      this.socialRefractory = 12;
+      this.handshakeEnergy = 2;
+      this.triSwarmEnergy = 3;
+      this.handshakeCooldown = 0;
+      this.triSwarmCooldown = 0;
       this.stasisEvents = 0;
       this.handshakeEvents = 0; // AMMC acoustic synergy events
       this.triSwarmResonanceEvents = 0; // Triangular 3-agent acoustic swarm events
       this.giantFiberEvents = 0; // Giant Fiber emergency looming escape saccades
       this.beaconWaypoints = []; // Cartographer luminescent beacon waypoints
+    }
+
+    /**
+     * Highest-preference action the fly can actually take.
+     *
+     * Without bounds the caller clamps the move instead, so a fly whose
+     * preferred direction is a wall simply does not move, accrues dwell ticks
+     * and is penalised for stasis it cannot avoid. Given bounds, illegal
+     * directions are skipped, as the benchmark policies already do.
+     *
+     * @param {Array<number>} probabilities
+     * @param {number} x
+     * @param {number} y
+     * @param {{width:number, height:number}|null} bounds
+     * @returns {number} action index
+     */
+    _bestLegalAction(probabilities, x, y, bounds) {
+      let best = 0;
+      for (let a = 1; a < 4; a++) if (probabilities[a] > probabilities[best]) best = a;
+      if (!bounds) return best;
+      const order = [0, 1, 2, 3].sort((a, b) => probabilities[b] - probabilities[a] || a - b);
+      for (const a of order) {
+        if (this._isLegal(a, x, y, bounds)) return a;
+      }
+      return best;
+    }
+
+    _isLegal(action, x, y, bounds) {
+      if (!bounds) return true;
+      const nx = x + [0, 0, -1, 1][action];
+      const ny = y + [-1, 1, 0, 0][action];
+      return nx >= 0 && nx < bounds.width && ny >= 0 && ny < bounds.height;
+    }
+
+    /**
+     * Grid bounds, if the caller supplied them on the environment. Accepts
+     * gridSize for a square world or width/height for a rectangular one.
+     */
+    _boundsOf(env) {
+      if (!env) return null;
+      if (Number.isFinite(env.width) && Number.isFinite(env.height)) {
+        return { width: env.width, height: env.height };
+      }
+      if (Number.isFinite(env.gridSize)) return { width: env.gridSize, height: env.gridSize };
+      return null;
+    }
+
+    /**
+     * Heading and angular velocity for one fly.
+     *
+     * Heading is the direction the fly actually travelled. Deriving it from the
+     * fly's bearing from the centre of the world instead, as this did before,
+     * makes the compass encode which side of the arena the fly is on: an agent
+     * left of centre reads a heading of pi, the compass bias then favours
+     * moving further left, and the fly drives itself into the wall and stays
+     * there. A fly that did not move keeps the heading it had.
+     *
+     * @param {object} agentData - per-agent record holding lastHeading
+     * @param {number} stepDx
+     * @param {number} stepDy
+     * @returns {{heading:number, angularVelocity:number}}
+     */
+    _resolveHeading(agentData, stepDx, stepDy) {
+      const moved = stepDx !== 0 || stepDy !== 0;
+      const heading = moved ? Math.atan2(stepDy, stepDx) : agentData.lastHeading;
+      return { heading, angularVelocity: angleDelta(heading, agentData.lastHeading) };
     }
 
     _updateAgentRegime(agentData, sensoryState) {
@@ -1806,6 +1885,7 @@
     ) {
       // One environment tick, however many flies are resolved inside it.
       this.syncytium.beginTick();
+      const bounds = this._boundsOf(env);
 
       // 1. Calculate Inter-Agent Graph Metrics & Celestial Sun Angle
       const dx12 = env.agent2X - env.agent1X;
@@ -1888,8 +1968,9 @@
 
       // 3. Resolve Agent 1 (Harvester)
       this._updateAgentRegime(this.agent1, agent1Obs);
-      const h1 = Math.atan2(agent1Obs[1] - 0.5, agent1Obs[0] - 0.5);
-      const flyProbs1 = this.syncytium.step(agent1Obs, h1 - this.agent1.lastHeading, 0, env.agent1Energy, {
+      const motion1 = this._resolveHeading(this.agent1, stepDx1, stepDy1);
+      const h1 = motion1.heading;
+      const flyProbs1 = this.syncytium.step(agent1Obs, motion1.angularVelocity, 0, env.agent1Energy, {
         dx: dx12, dy: dy12, dist: peerDist, sunAngle, stepDx: stepDx1, stepDy: stepDy1
       }, EGO_AGENT1);
       this.agent1.lastHeading = h1;
@@ -1908,13 +1989,13 @@
         combProbs1[a] = (1 - dynamicBeta1) * agent1Logits[a] + dynamicBeta1 * flyProbs1[a];
       }
       const finalProbs1 = softmax(combProbs1, 0.8);
-      let maxA1 = 0;
-      for (let a = 1; a < 4; a++) if (finalProbs1[a] > finalProbs1[maxA1]) maxA1 = a;
+      let maxA1 = this._bestLegalAction(finalProbs1, env.agent1X, env.agent1Y, bounds);
 
       if (this.agent1.isGFEscape) {
         this.agent1.committedAction = maxA1;
         this.agent1.commitmentTimer = 0;
-      } else if (this.agent1.commitmentTimer > 0 && this.agent1.behavioralRegime !== "EVADE") {
+      } else if (this.agent1.commitmentTimer > 0 && this.agent1.behavioralRegime !== "EVADE"
+        && this._isLegal(this.agent1.committedAction, env.agent1X, env.agent1Y, bounds)) {
         this.agent1.commitmentTimer--;
         maxA1 = this.agent1.committedAction;
       } else {
@@ -1924,8 +2005,9 @@
 
       // 4. Resolve Agent 2 (Sentinel-Pioneer)
       this._updateAgentRegime(this.agent2, agent2Obs);
-      const h2 = Math.atan2(agent2Obs[1] - 0.5, agent2Obs[0] - 0.5);
-      const flyProbs2 = this.syncytium.step(agent2Obs, h2 - this.agent2.lastHeading, 0.5, env.agent2Energy, {
+      const motion2 = this._resolveHeading(this.agent2, stepDx2, stepDy2);
+      const h2 = motion2.heading;
+      const flyProbs2 = this.syncytium.step(agent2Obs, motion2.angularVelocity, 0.5, env.agent2Energy, {
         dx: -dx12, dy: -dy12, dist: peerDist, sunAngle, stepDx: stepDx2, stepDy: stepDy2
       }, EGO_AGENT2);
       this.agent2.lastHeading = h2;
@@ -1944,13 +2026,13 @@
         combProbs2[a] = (1 - dynamicBeta2) * agent2Logits[a] + dynamicBeta2 * flyProbs2[a];
       }
       const finalProbs2 = softmax(combProbs2, 0.8);
-      let maxA2 = 0;
-      for (let a = 1; a < 4; a++) if (finalProbs2[a] > finalProbs2[maxA2]) maxA2 = a;
+      let maxA2 = this._bestLegalAction(finalProbs2, env.agent2X, env.agent2Y, bounds);
 
       if (this.agent2.isGFEscape) {
         this.agent2.committedAction = maxA2;
         this.agent2.commitmentTimer = 0;
-      } else if (this.agent2.commitmentTimer > 0 && this.agent2.behavioralRegime !== "EVADE") {
+      } else if (this.agent2.commitmentTimer > 0 && this.agent2.behavioralRegime !== "EVADE"
+        && this._isLegal(this.agent2.committedAction, env.agent2X, env.agent2Y, bounds)) {
         this.agent2.commitmentTimer--;
         maxA2 = this.agent2.committedAction;
       } else {
@@ -1962,8 +2044,9 @@
       let maxA3 = 0, finalProbs3 = [0.25, 0.25, 0.25, 0.25];
       if (hasAgent3) {
         this._updateAgentRegime(this.agent3, agent3Obs);
-        const h3 = Math.atan2(agent3Obs[1] - 0.5, agent3Obs[0] - 0.5);
-        const flyProbs3 = this.syncytium.step(agent3Obs, h3 - this.agent3.lastHeading, 0.3, env.agent3Energy || 100, {
+        const motion3 = this._resolveHeading(this.agent3, stepDx3, stepDy3);
+        const h3 = motion3.heading;
+        const flyProbs3 = this.syncytium.step(agent3Obs, motion3.angularVelocity, 0.3, env.agent3Energy || 100, {
           dx: dx31, dy: dy31, dist: dist31, sunAngle, stepDx: stepDx3, stepDy: stepDy3
         }, EGO_AGENT3);
         this.agent3.lastHeading = h3;
@@ -1981,12 +2064,13 @@
           combProbs3[a] = (1 - dynamicBeta3) * agent3Logits[a] + dynamicBeta3 * flyProbs3[a];
         }
         finalProbs3 = softmax(combProbs3, 0.8);
-        for (let a = 1; a < 4; a++) if (finalProbs3[a] > finalProbs3[maxA3]) maxA3 = a;
+        maxA3 = this._bestLegalAction(finalProbs3, env.agent3X, env.agent3Y, bounds);
 
         if (this.agent3.isGFEscape) {
           this.agent3.committedAction = maxA3;
           this.agent3.commitmentTimer = 0;
-        } else if (this.agent3.commitmentTimer > 0 && this.agent3.behavioralRegime !== "EVADE") {
+        } else if (this.agent3.commitmentTimer > 0 && this.agent3.behavioralRegime !== "EVADE"
+          && this._isLegal(this.agent3.committedAction, env.agent3X, env.agent3Y, bounds)) {
           this.agent3.commitmentTimer--;
           maxA3 = this.agent3.committedAction;
         } else {
@@ -2009,25 +2093,33 @@
         }
       }
 
+      if (this.handshakeCooldown > 0) this.handshakeCooldown--;
+      if (this.triSwarmCooldown > 0) this.triSwarmCooldown--;
+
       // 6. AMMC Acoustic Courtship/Wing-Song Handshake & Energy Resonance (Dual Pair)
+      const handshakeInRange = peerDist <= 2.5
+        && !this.agent1.isStasisHazard && !this.agent2.isStasisHazard;
       let isAcousticHandshake = false;
-      if (peerDist <= 2.5 && !this.agent1.isStasisHazard && !this.agent2.isStasisHazard) {
+      if (handshakeInRange && this.handshakeCooldown === 0) {
         isAcousticHandshake = true;
         this.handshakeEvents++;
-        if (env.agent1Energy !== undefined) env.agent1Energy = Math.min(180, env.agent1Energy + 2);
-        if (env.agent2Energy !== undefined) env.agent2Energy = Math.min(180, env.agent2Energy + 2);
+        this.handshakeCooldown = this.socialRefractory;
+        if (env.agent1Energy !== undefined) env.agent1Energy = Math.min(180, env.agent1Energy + this.handshakeEnergy);
+        if (env.agent2Energy !== undefined) env.agent2Energy = Math.min(180, env.agent2Energy + this.handshakeEnergy);
         this.syncytium.applyReinforcement(0.4, 0.0, null, EGO_AGENT1);
         this.syncytium.applyReinforcement(0.4, 0.0, null, EGO_AGENT2);
       }
 
       // 7. Tri-Trophic Swarm Resonance (Triangular 3-Agent Mesh)
+      const triSwarmInRange = hasAgent3 && dist12 <= 4.0 && dist23 <= 4.0 && dist31 <= 4.0;
       let isTriSwarmResonance = false;
-      if (hasAgent3 && dist12 <= 4.0 && dist23 <= 4.0 && dist31 <= 4.0) {
+      if (triSwarmInRange && this.triSwarmCooldown === 0) {
         isTriSwarmResonance = true;
         this.triSwarmResonanceEvents++;
-        if (env.agent1Energy !== undefined) env.agent1Energy = Math.min(180, env.agent1Energy + 3);
-        if (env.agent2Energy !== undefined) env.agent2Energy = Math.min(180, env.agent2Energy + 3);
-        if (env.agent3Energy !== undefined) env.agent3Energy = Math.min(180, env.agent3Energy + 3);
+        this.triSwarmCooldown = this.socialRefractory;
+        if (env.agent1Energy !== undefined) env.agent1Energy = Math.min(180, env.agent1Energy + this.triSwarmEnergy);
+        if (env.agent2Energy !== undefined) env.agent2Energy = Math.min(180, env.agent2Energy + this.triSwarmEnergy);
+        if (env.agent3Energy !== undefined) env.agent3Energy = Math.min(180, env.agent3Energy + this.triSwarmEnergy);
         this.syncytium.applyReinforcement(0.8, 0.0, null, EGO_AGENT1);
         this.syncytium.applyReinforcement(0.8, 0.0, null, EGO_AGENT2);
         this.syncytium.applyReinforcement(0.8, 0.0, null, EGO_AGENT3);
@@ -2066,19 +2158,38 @@
         dist31,
         sunAngle: this.sunAngle,
         isAcousticHandshake,
+        // In range but inside the refractory window: the UI can still show the
+        // pair as paired without implying another bonus was paid.
+        isHandshakeInRange: handshakeInRange,
         handshakeEvents: this.handshakeEvents,
         isTriSwarmResonance,
+        isTriSwarmInRange: triSwarmInRange,
         triSwarmResonanceEvents: this.triSwarmResonanceEvents,
         beaconWaypoints: this.beaconWaypoints
       };
     }
 
     // Single-agent backward compatibility wrapper
-    resolveAction(agentState, agentActionLogits, novelty = 0, agentEnergy = 100) {
+    /**
+     * @param {ArrayLike<number>} agentState
+     * @param {Array<number>} agentActionLogits
+     * @param {number} [novelty]
+     * @param {number} [agentEnergy]
+     * @param {{stepDx:number, stepDy:number}} [motion] - the fly's last actual
+     *   step. Without it the heading falls back to the fly's bearing from the
+     *   centre of the world, which is not a heading; pass it where you can.
+     */
+    resolveAction(agentState, agentActionLogits, novelty = 0, agentEnergy = 100, motion = null) {
       this._updateAgentRegime(this.agent1, agentState);
-      const h1 = Math.atan2(agentState[1] - 0.5, agentState[0] - 0.5);
+      const resolved = motion
+        ? this._resolveHeading(this.agent1, motion.stepDx || 0, motion.stepDy || 0)
+        : {
+          heading: Math.atan2(agentState[1] - 0.5, agentState[0] - 0.5),
+          angularVelocity: Math.atan2(agentState[1] - 0.5, agentState[0] - 0.5) - this.agent1.lastHeading
+        };
+      const h1 = resolved.heading;
       const flyProbs = this.syncytium.step(
-        agentState, h1 - this.agent1.lastHeading, novelty, agentEnergy, null, EGO_AGENT1
+        agentState, resolved.angularVelocity, novelty, agentEnergy, null, EGO_AGENT1
       );
       this.agent1.lastHeading = h1;
       this.agent1.lastFlyProbabilities = flyProbs;
@@ -2184,6 +2295,8 @@
         apoptosisEvents: sync.neurogenesis.apoptosisCount,
         stasisEvents: graft.stasisEvents || 0,
         handshakeEvents: graft.handshakeEvents || 0,
+        handshakeCooldown: graft.handshakeCooldown || 0,
+        triSwarmCooldown: graft.triSwarmCooldown || 0,
         triSwarmResonanceEvents: graft.triSwarmResonanceEvents || 0,
         giantFiberEvents: graft.giantFiberEvents || 0,
         beaconWaypoints: graft.beaconWaypoints || [],
@@ -2300,6 +2413,8 @@
       }
       if (data.circadianClock !== undefined) sync.circadianClock = data.circadianClock;
       if (data.handshakeEvents !== undefined) graft.handshakeEvents = data.handshakeEvents;
+      if (data.handshakeCooldown !== undefined) graft.handshakeCooldown = data.handshakeCooldown;
+      if (data.triSwarmCooldown !== undefined) graft.triSwarmCooldown = data.triSwarmCooldown;
       sync.isPretrained = data.isPretrained || false;
       sync.pretrainingEpochs = data.pretrainingEpochs || 0;
       sync.neurogenesis.mitosisCount = data.mitosisEvents || 0;
@@ -2378,18 +2493,36 @@
       }
     }
 
-    static loadFromLocalStorage(graft) {
+    /**
+     * The saved JSON document, without deserialising it. Callers that want to
+     * restore a run need the document itself: loadFromLocalStorage returns only
+     * the caller's extra payload, which is not a snapshot and cannot be fed
+     * back into deserialize.
+     *
+     * @returns {string|null}
+     */
+    static readRawFromLocalStorage() {
       try {
         if (typeof localStorage === "undefined") return null;
-        let json = localStorage.getItem(this.STORAGE_KEY);
-        if (!json) {
-          // Fallback check for v5 state
-          json = localStorage.getItem("diamond_sim_fly_brain_state_v5");
+        for (const key of [
+          this.STORAGE_KEY,
+          "diamond_sim_fly_brain_state_v6",
+          "diamond_sim_fly_brain_state_v5",
+          "diamond_sim_fly_brain_state_v4"
+        ]) {
+          const json = localStorage.getItem(key);
+          if (json) return json;
         }
-        if (!json) {
-          // Fallback check for v4 state
-          json = localStorage.getItem("diamond_sim_fly_brain_state_v4");
-        }
+        return null;
+      } catch (err) {
+        console.warn("Could not read fly brain state from localStorage:", err);
+        return null;
+      }
+    }
+
+    static loadFromLocalStorage(graft) {
+      try {
+        const json = this.readRawFromLocalStorage();
         if (!json) return null;
         return this.deserialize(graft, json);
       } catch (err) {

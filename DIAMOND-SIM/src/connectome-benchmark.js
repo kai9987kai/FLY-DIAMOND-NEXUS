@@ -35,8 +35,22 @@
     ChemicalFieldGrid,
     DrosophilaBrain,
     SixteenFlyBrainSyncytium,
-    PreTrainingEngine
+    PreTrainingEngine,
+    angleDelta
   } = FlyBrainEngine;
+
+  /**
+   * Angular velocity from a step vector, given the previous heading. The
+   * compass integrates a turn rate, so handing it an absolute bearing makes the
+   * heading estimate meaningless. A fly that did not move did not turn.
+   */
+  function turnRate(policy, stepDx, stepDy) {
+    if (stepDx === 0 && stepDy === 0) return 0;
+    const heading = Math.atan2(stepDy, stepDx);
+    const delta = angleDelta(heading, policy.heading);
+    policy.heading = heading;
+    return delta;
+  }
 
   function clamp(val, min, max) {
     return Math.max(min, Math.min(max, val));
@@ -399,8 +413,7 @@
       this.heading = 0;
     }
     act(sensoryObs, stepDx = 0, stepDy = 0, energy = 100, stepIndex = 0, currentX = 0, currentY = 0, gridSize = 16) {
-      const hDelta = Math.atan2(stepDy, stepDx || 0.001);
-      const probs = this.syncytium.step(sensoryObs, hDelta, 0, energy, {
+      const probs = this.syncytium.step(sensoryObs, turnRate(this, stepDx, stepDy), 0, energy, {
         dx: 0, dy: 0, dist: 5, sunAngle: 0, stepDx, stepDy
       });
       const sorted = [0, 1, 2, 3].sort((a, b) => probs[b] - probs[a]);
@@ -432,9 +445,7 @@
     }
     act(sensoryObs, stepDx = 0, stepDy = 0, energy = 100, stepIndex = 0, currentX = 0, currentY = 0, gridSize = 16) {
       const sunAngle = ((stepIndex % 120) / 120) * Math.PI * 2;
-      const hDelta = Math.atan2(stepDy, stepDx || 0.001);
-
-      const probs = this.syncytium.step(sensoryObs, hDelta, 0, energy, {
+      const probs = this.syncytium.step(sensoryObs, turnRate(this, stepDx, stepDy), 0, energy, {
         dx: 0, dy: 0, dist: 99, sunAngle, stepDx, stepDy
       });
 
