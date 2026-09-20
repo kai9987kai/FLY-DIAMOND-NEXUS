@@ -79,6 +79,32 @@
     int(max) {
       return Math.floor(this.next() * max);
     }
+
+    /**
+     * Capture the full generator state. `state` is the only value that
+     * determines future draws; `drawCount` is bookkeeping. Restoring
+     * `drawCount` alone leaves the stream where it started, so both are
+     * required for an exact resume.
+     */
+    getState() {
+      return { initialSeed: this.initialSeed, state: this.state, drawCount: this.drawCount };
+    }
+
+    setState(snapshot) {
+      if (!snapshot || typeof snapshot !== "object") return this;
+      if (Number.isFinite(snapshot.initialSeed)) this.initialSeed = snapshot.initialSeed >>> 0;
+      if (Number.isFinite(snapshot.state)) this.state = snapshot.state >>> 0;
+      if (Number.isFinite(snapshot.drawCount)) this.drawCount = snapshot.drawCount;
+      return this;
+    }
+
+    /** Fork an independent stream so a subsystem cannot perturb the caller's draws. */
+    fork(salt = 0) {
+      const child = new MulberryPRNG(0);
+      child.initialSeed = (this.initialSeed ^ Math.imul(salt + 1, 0x9e3779b9)) >>> 0;
+      child.state = child.initialSeed;
+      return child;
+    }
   }
 
   // -------------------------------------------------------------
@@ -284,6 +310,68 @@
       this.kcToMbonWeights = this._initKcMbonWeights(this.KC_BASE_COUNT);
       this.eligibilityTraces = new Float32Array(this.KC_BASE_COUNT * this.MBON_COUNT);
       this.descendingOutputs = new Float32Array(4);
+    }
+
+    /**
+     * Registers that belong to one individual fly rather than to the shared
+     * connectome: heading, gait phase, metabolic titres, latches, activations.
+     * Learned synaptic weights are deliberately absent -- those are shared.
+     */
+    static EGO_SCALARS = [
+      "compassHeading", "lalFlipFlop", "lalTimer", "vncGaitPhase", "vncTorque",
+      "ammcVibration", "pbPhaseShift", "ebStabilization",
+      "noOdometryDistance", "homeHeading", "aotuSunHeading", "aotuEVectorAlignment",
+      "smpLatchedAction", "smpLatchTimer",
+      "metabolicSatiety", "sugarDrive", "bitterAversion",
+      "neuropeptideNPF", "neuropeptideSIFamide",
+      "dopaminePAM", "dopaminePPL1", "octopamineOA", "serotonin5HT", "pdfArousal",
+      "lastHazardSense", "loomingVelocity", "giantFiberTriggered"
+    ];
+
+    static EGO_ARRAYS = [
+      "alProjection", "kcActivations", "mbonActivations", "compassRing",
+      "opticMotionFlow", "ebRingAttractor", "descendingOutputs", "epgRing"
+    ];
+
+    /** Copy this brain's per-individual registers into a reusable container. */
+    captureEgo(into = null) {
+      const ego = into || { scalars: Object.create(null), arrays: Object.create(null), born: null };
+      for (const key of DrosophilaBrain.EGO_SCALARS) ego.scalars[key] = this[key];
+      for (const key of DrosophilaBrain.EGO_ARRAYS) {
+        const src = this[key];
+        if (!src) continue;
+        let dst = ego.arrays[key];
+        if (!dst || dst.length !== src.length) dst = ego.arrays[key] = new Float32Array(src.length);
+        dst.set(src);
+      }
+      ego.arrays.lastVisualSensors = Float32Array.from(this.lastVisualSensors);
+      ego.arrays.ammcPeerAcoustic = Float32Array.from(this.ammcPeerAcoustic);
+      ego.arrays.noHomeVector = Float32Array.from(this.noHomeVector);
+      const born = ego.born && ego.born.length === this.bornNeurons.length
+        ? ego.born
+        : new Float32Array(this.bornNeurons.length);
+      for (let i = 0; i < this.bornNeurons.length; i++) born[i] = this.bornNeurons[i].activation;
+      ego.born = born;
+      return ego;
+    }
+
+    /** Load per-individual registers previously captured by captureEgo. */
+    restoreEgo(ego) {
+      if (!ego) return;
+      for (const key of DrosophilaBrain.EGO_SCALARS) {
+        if (ego.scalars[key] !== undefined) this[key] = ego.scalars[key];
+      }
+      for (const key of DrosophilaBrain.EGO_ARRAYS) {
+        const src = ego.arrays[key];
+        if (src && this[key] && this[key].length === src.length) this[key].set(src);
+      }
+      if (ego.arrays.lastVisualSensors) this.lastVisualSensors = Array.from(ego.arrays.lastVisualSensors);
+      if (ego.arrays.ammcPeerAcoustic) this.ammcPeerAcoustic = Array.from(ego.arrays.ammcPeerAcoustic);
+      if (ego.arrays.noHomeVector) this.noHomeVector = Array.from(ego.arrays.noHomeVector);
+      if (ego.born) {
+        const n = Math.min(ego.born.length, this.bornNeurons.length);
+        for (let i = 0; i < n; i++) this.bornNeurons[i].activation = ego.born[i];
+      }
     }
 
     _initSparseAlKcWeights(kcCount) {
@@ -652,11 +740,19 @@
   // Dynamic Algorithmic Neurogenesis Engine
   // -------------------------------------------------------------
   class NeurogenesisEngine {
-    constructor(maxBornPerBrain = 24) {
+    /**
+     * @param {number} maxBornPerBrain
+     * @param {MulberryPRNG} [prng] - seeded stream for birth weights. Supplied by
+     *   the syncytium so that two runs from the same world seed grow identical
+     *   Kenyon cells; without it the pool would depend on Math.random().
+     */
+    constructor(maxBornPerBrain = 24, prng = null) {
       this.maxBornPerBrain = maxBornPerBrain;
       this.noveltyThreshold = 0.25;
       this.mitosisCount = 0;
       this.apoptosisCount = 0;
+      this.birthCounter = 0;
+      this.prng = prng || new MulberryPRNG(0x5eed1e55);
     }
 
     evaluate(brain, noveltyError, agentEnergy) {
@@ -682,16 +778,17 @@
     }
 
     _spawnKenyonCell(brain) {
-      const id = `${brain.id}_born_${Date.now()}_${brain.bornNeurons.length}`;
+      const rng = this.prng;
+      const id = `${brain.id}_born_${this.birthCounter++}`;
       const weights = new Float32Array(brain.GLOMERULI_COUNT);
       for (let i = 0; i < 3; i++) {
-        const g = Math.floor(Math.random() * brain.GLOMERULI_COUNT);
-        weights[g] = 0.3 + Math.random() * 0.4;
+        const g = rng.int(brain.GLOMERULI_COUNT);
+        weights[g] = 0.3 + rng.next() * 0.4;
       }
 
       const mbonWeights = new Float32Array(brain.MBON_COUNT);
       for (let m = 0; m < brain.MBON_COUNT; m++) {
-        mbonWeights[m] = 0.2 + Math.random() * 0.1;
+        mbonWeights[m] = 0.2 + rng.next() * 0.1;
       }
 
       brain.bornNeurons.push({
@@ -785,7 +882,8 @@
         this.brains.push(new DrosophilaBrain(i, this.roles[i]));
       }
 
-      this.neurogenesis = new NeurogenesisEngine(24);
+      // Forked so neurogenesis draws cannot shift any other seeded stream.
+      this.neurogenesis = new NeurogenesisEngine(24, this.prng.fork(1));
       this.commissuralWeights = this._initCommissuralWeights();
 
       this.engramBank = [];
@@ -800,6 +898,81 @@
       this.circadianClock = 0;
       this.circadianPeriod = 120;
       this.pdfArousal = 1.0;
+
+      // Environment ticks, distinct from forward passes. One tick may contain
+      // several forward passes (one per fly), so the clock and the homeostatic
+      // schedule are driven from tickCount rather than from syncytiumSteps.
+      this.tickCount = 0;
+      this._tickOpen = false;
+      this._tickAuto = false;
+
+      // Shared connectome, separate bodies: one ego record per fly holds the
+      // registers that must not leak between individuals.
+      this.egoStates = new Map();
+      this._pristineEgo = this.brains.map(b => b.captureEgo());
+      this.activeEgoId = null;
+    }
+
+    /**
+     * Open an environment tick: advance the circadian clock and run the
+     * homeostatic schedule exactly once, however many flies step afterwards.
+     */
+    beginTick() {
+      this._advanceTick();
+      this._tickOpen = true;
+      this._tickAuto = false;
+      return this;
+    }
+
+    /** Close a tick opened by beginTick. */
+    endTick() {
+      this._tickOpen = false;
+      this._tickAuto = false;
+      return this;
+    }
+
+    _advanceTick() {
+      this.tickCount++;
+      this.circadianClock = (this.circadianClock + 1) % this.circadianPeriod;
+      const isDay = this.circadianClock < this.circadianPeriod / 2;
+      this.pdfArousal = isDay
+        ? 1.0 + 0.25 * Math.sin((this.circadianClock / (this.circadianPeriod / 2)) * Math.PI)
+        : 0.65;
+      if (this.tickCount % 50 === 0) {
+        for (let i = 0; i < this.brainCount; i++) this.brains[i].applyHomeostaticScaling(0.25);
+      }
+    }
+
+    _egoRecord(egoId) {
+      let record = this.egoStates.get(egoId);
+      if (!record) {
+        // A new fly starts from the pristine registers, not from whichever
+        // individual happened to step last.
+        record = this._pristineEgo.map(ego => ({
+          scalars: Object.assign(Object.create(null), ego.scalars),
+          arrays: Object.fromEntries(Object.entries(ego.arrays).map(([k, v]) => [k, Float32Array.from(v)])),
+          born: Float32Array.from(ego.born)
+        }));
+        this.egoStates.set(egoId, record);
+      }
+      return record;
+    }
+
+    /** Swap a fly's registers into the shared brains. */
+    loadEgo(egoId) {
+      if (egoId === null || egoId === undefined) return this;
+      const record = this._egoRecord(egoId);
+      for (let i = 0; i < this.brains.length; i++) this.brains[i].restoreEgo(record[i]);
+      this.activeEgoId = egoId;
+      return this;
+    }
+
+    /** Copy the shared brains' current registers back into a fly's record. */
+    saveEgo(egoId) {
+      if (egoId === null || egoId === undefined) return this;
+      const record = this._egoRecord(egoId);
+      for (let i = 0; i < this.brains.length; i++) this.brains[i].captureEgo(record[i]);
+      return this;
     }
 
     _initCommissuralWeights() {
@@ -847,15 +1020,31 @@
       return { x: 0, y: 0, distance: 0, heading: 0, active: false };
     }
 
-    step(sensoryInput, headingDelta = 0, noveltyError = 0, agentEnergy = 100, peerContext = null) {
+    /**
+     * One forward pass through the syncytium for a single fly.
+     *
+     * @param {ArrayLike<number>} sensoryInput - 14-channel sensory vector
+     * @param {number} headingDelta - angular velocity for the compass
+     * @param {number} noveltyError - drives neurogenesis
+     * @param {number} agentEnergy - metabolic budget
+     * @param {object|null} peerContext - peer geometry, sun angle, step vector
+     * @param {*} [egoId] - identifies the fly; its registers are swapped in and
+     *   out so several flies can share one connectome without leaking heading,
+     *   odometry, gait phase or metabolic state into each other. Omit for the
+     *   single-fly case.
+     */
+    step(sensoryInput, headingDelta = 0, noveltyError = 0, agentEnergy = 100, peerContext = null, egoId = null) {
       this.syncytiumSteps++;
 
-      // Circadian Clock advance & PDF modulation
-      this.circadianClock = (this.circadianClock + 1) % this.circadianPeriod;
+      // A caller that never opens a tick explicitly (the single-fly case) gets
+      // one tick per forward pass, as before.
+      if (!this._tickOpen) {
+        this._advanceTick();
+        this._tickAuto = true;
+      }
       const isDay = this.circadianClock < this.circadianPeriod / 2;
-      this.pdfArousal = isDay
-        ? 1.0 + 0.25 * Math.sin((this.circadianClock / (this.circadianPeriod / 2)) * Math.PI)
-        : 0.65;
+
+      if (egoId !== null && egoId !== undefined) this.loadEgo(egoId);
 
       const execContext = this._computeExecutiveGoalVector(sensoryInput);
 
@@ -883,10 +1072,6 @@
         individualOutputs.push(out);
 
         this.neurogenesis.evaluate(brain, noveltyError, agentEnergy);
-
-        if (this.syncytiumSteps % 50 === 0) {
-          brain.applyHomeostaticScaling(0.25);
-        }
       }
 
       // 2. Inter-Brain Commissural Cross-Talk (16x16x4 = 1024 synapses)
@@ -944,10 +1129,26 @@
 
       this.lastEstimatedValue = (consensusLogits[0] + consensusLogits[1] + consensusLogits[2] + consensusLogits[3]) / 4;
 
+      if (egoId !== null && egoId !== undefined) this.saveEgo(egoId);
+      if (this._tickAuto) {
+        this._tickOpen = false;
+        this._tickAuto = false;
+      }
+
       return softmax(consensusLogits);
     }
 
-    applyReinforcement(rewardDelta, hazardDelta, currentCoordinates = null) {
+    /**
+     * @param {number} rewardDelta
+     * @param {number} hazardDelta
+     * @param {object|null} currentCoordinates
+     * @param {*} [egoId] - the fly being credited. Plasticity reads the KC and
+     *   MBON activations that produced the action, so crediting a shared
+     *   connectome without naming the fly would train whichever individual
+     *   stepped last.
+     */
+    applyReinforcement(rewardDelta, hazardDelta, currentCoordinates = null, egoId = null) {
+      if (egoId !== null && egoId !== undefined) this.loadEgo(egoId);
       const netExtrinsic = rewardDelta - (hazardDelta * 1.5);
       const rpe = netExtrinsic + (this.tdGamma * this.lastEstimatedValue * 0.1) - (this.lastEstimatedValue * 0.1);
       this.lastRPE = rpe;
@@ -962,11 +1163,13 @@
       if (rewardDelta > 0.4 || pamBurst > 0.5) {
         this._consolidateEngram(Math.max(rewardDelta, pamBurst), currentCoordinates);
       }
+
+      if (egoId !== null && egoId !== undefined) this.saveEgo(egoId);
     }
 
     _consolidateEngram(salience, coords = null) {
       const engram = {
-        timestamp: Date.now(),
+        step: this.syncytiumSteps,
         salience,
         compassMean: this.brains[1].compassHeading,
         activeKCs: this.brains[3].kcActivations.slice(0, 10),
@@ -1043,6 +1246,11 @@
   // -------------------------------------------------------------
   // Dual-Agent Graph Grafting with Stagnation Inactivity Hazard
   // -------------------------------------------------------------
+  // Stable ego identifiers so the same fly always maps to the same registers.
+  const EGO_AGENT1 = "agent1";
+  const EGO_AGENT2 = "agent2";
+  const EGO_AGENT3 = "agent3";
+
   class MultiAgentGraphGraft {
     /**
      * @param {SixteenFlyBrainSyncytium} syncytium
@@ -1144,6 +1352,9 @@
       agent2Logits = [0.25, 0.25, 0.25, 0.25],
       agent3Logits = [0.25, 0.25, 0.25, 0.25]
     ) {
+      // One environment tick, however many flies are resolved inside it.
+      this.syncytium.beginTick();
+
       // 1. Calculate Inter-Agent Graph Metrics & Celestial Sun Angle
       const dx12 = env.agent2X - env.agent1X;
       const dy12 = env.agent2Y - env.agent1Y;
@@ -1186,7 +1397,7 @@
       if (this.agent1.isStasisHazard) {
         this.stasisEvents++;
         env.agent1Energy = Math.max(0, env.agent1Energy - this.stasisEnergyDrain);
-        this.syncytium.applyReinforcement(0, 1.2);
+        this.syncytium.applyReinforcement(0, 1.2, null, EGO_AGENT1);
       }
 
       // Check Stagnation Dwell Times for Agent 2
@@ -1201,7 +1412,7 @@
       if (this.agent2.isStasisHazard) {
         this.stasisEvents++;
         env.agent2Energy = Math.max(0, env.agent2Energy - this.stasisEnergyDrain);
-        this.syncytium.applyReinforcement(0, 1.2);
+        this.syncytium.applyReinforcement(0, 1.2, null, EGO_AGENT2);
       }
 
       // Check Stagnation Dwell Times for Agent 3
@@ -1219,7 +1430,7 @@
           if (env.agent3Energy !== undefined) {
             env.agent3Energy = Math.max(0, env.agent3Energy - this.stasisEnergyDrain);
           }
-          this.syncytium.applyReinforcement(0, 1.2);
+          this.syncytium.applyReinforcement(0, 1.2, null, EGO_AGENT3);
         }
       }
 
@@ -1228,7 +1439,7 @@
       const h1 = Math.atan2(agent1Obs[1] - 0.5, agent1Obs[0] - 0.5);
       const flyProbs1 = this.syncytium.step(agent1Obs, h1 - this.agent1.lastHeading, 0, env.agent1Energy, {
         dx: dx12, dy: dy12, dist: peerDist, sunAngle, stepDx: stepDx1, stepDy: stepDy1
-      });
+      }, EGO_AGENT1);
       this.agent1.lastHeading = h1;
       this.agent1.lastFlyProbabilities = flyProbs1;
 
@@ -1264,7 +1475,7 @@
       const h2 = Math.atan2(agent2Obs[1] - 0.5, agent2Obs[0] - 0.5);
       const flyProbs2 = this.syncytium.step(agent2Obs, h2 - this.agent2.lastHeading, 0.5, env.agent2Energy, {
         dx: -dx12, dy: -dy12, dist: peerDist, sunAngle, stepDx: stepDx2, stepDy: stepDy2
-      });
+      }, EGO_AGENT2);
       this.agent2.lastHeading = h2;
       this.agent2.lastFlyProbabilities = flyProbs2;
 
@@ -1302,7 +1513,7 @@
         const h3 = Math.atan2(agent3Obs[1] - 0.5, agent3Obs[0] - 0.5);
         const flyProbs3 = this.syncytium.step(agent3Obs, h3 - this.agent3.lastHeading, 0.3, env.agent3Energy || 100, {
           dx: dx31, dy: dy31, dist: dist31, sunAngle, stepDx: stepDx3, stepDy: stepDy3
-        });
+        }, EGO_AGENT3);
         this.agent3.lastHeading = h3;
         this.agent3.lastFlyProbabilities = flyProbs3;
 
@@ -1339,7 +1550,7 @@
               x: env.agent3X,
               y: env.agent3Y,
               strength: 1.0,
-              timestamp: Date.now()
+              step: this.syncytium.syncytiumSteps
             });
             if (this.beaconWaypoints.length > 8) this.beaconWaypoints.shift();
           }
@@ -1353,7 +1564,8 @@
         this.handshakeEvents++;
         if (env.agent1Energy !== undefined) env.agent1Energy = Math.min(180, env.agent1Energy + 2);
         if (env.agent2Energy !== undefined) env.agent2Energy = Math.min(180, env.agent2Energy + 2);
-        this.syncytium.applyReinforcement(0.4, 0.0);
+        this.syncytium.applyReinforcement(0.4, 0.0, null, EGO_AGENT1);
+        this.syncytium.applyReinforcement(0.4, 0.0, null, EGO_AGENT2);
       }
 
       // 7. Tri-Trophic Swarm Resonance (Triangular 3-Agent Mesh)
@@ -1364,8 +1576,12 @@
         if (env.agent1Energy !== undefined) env.agent1Energy = Math.min(180, env.agent1Energy + 3);
         if (env.agent2Energy !== undefined) env.agent2Energy = Math.min(180, env.agent2Energy + 3);
         if (env.agent3Energy !== undefined) env.agent3Energy = Math.min(180, env.agent3Energy + 3);
-        this.syncytium.applyReinforcement(0.8, 0.0);
+        this.syncytium.applyReinforcement(0.8, 0.0, null, EGO_AGENT1);
+        this.syncytium.applyReinforcement(0.8, 0.0, null, EGO_AGENT2);
+        this.syncytium.applyReinforcement(0.8, 0.0, null, EGO_AGENT3);
       }
+
+      this.syncytium.endTick();
 
       return {
         agent1: {
@@ -1409,7 +1625,9 @@
     resolveAction(agentState, agentActionLogits, novelty = 0, agentEnergy = 100) {
       this._updateAgentRegime(this.agent1, agentState);
       const h1 = Math.atan2(agentState[1] - 0.5, agentState[0] - 0.5);
-      const flyProbs = this.syncytium.step(agentState, h1 - this.agent1.lastHeading, novelty, agentEnergy);
+      const flyProbs = this.syncytium.step(
+        agentState, h1 - this.agent1.lastHeading, novelty, agentEnergy, null, EGO_AGENT1
+      );
       this.agent1.lastHeading = h1;
       this.agent1.lastFlyProbabilities = flyProbs;
 
@@ -1432,10 +1650,18 @@
       };
     }
 
-    feedback(reward, hitHazard, currentCoordinates = null) {
+    /**
+     * @param {number} reward
+     * @param {boolean} hitHazard
+     * @param {object|null} currentCoordinates
+     * @param {string} [agentKey] - "agent1" | "agent2" | "agent3". Names the fly
+     *   whose activations earned the outcome so credit lands on the synapses
+     *   that actually drove the action. Defaults to the harvester.
+     */
+    feedback(reward, hitHazard, currentCoordinates = null, agentKey = EGO_AGENT1) {
       const rewardDelta = Math.max(0, reward);
       const hazardDelta = hitHazard ? 1.0 : (reward < 0 ? Math.abs(reward) : 0);
-      this.syncytium.applyReinforcement(rewardDelta, hazardDelta, currentCoordinates);
+      this.syncytium.applyReinforcement(rewardDelta, hazardDelta, currentCoordinates, agentKey);
     }
   }
 
@@ -1455,6 +1681,9 @@
         timestamp: Date.now(),
         worldSeed: sync.worldSeed,
         prngDrawCount: sync.prng ? sync.prng.drawCount : 0,
+        prngState: sync.prng ? sync.prng.getState() : null,
+        neurogenesisPrngState: sync.neurogenesis.prng ? sync.neurogenesis.prng.getState() : null,
+        neurogenesisBirthCounter: sync.neurogenesis.birthCounter || 0,
         graftInfluence: graft.graftInfluence,
         isPretrained: sync.isPretrained,
         pretrainingEpochs: sync.pretrainingEpochs,
@@ -1550,7 +1779,19 @@
       const sync = graft.syncytium;
       sync.worldSeed = data.worldSeed !== undefined ? data.worldSeed : 42;
       sync.prng = new MulberryPRNG(sync.worldSeed);
-      if (data.prngDrawCount) sync.prng.drawCount = data.prngDrawCount;
+      if (data.prngState) {
+        // v7+: exact stream position. Older files carry only a draw count,
+        // which cannot place the stream, so they resume from the seed.
+        sync.prng.setState(data.prngState);
+      } else if (data.prngDrawCount) {
+        sync.prng.drawCount = data.prngDrawCount;
+      }
+      if (data.neurogenesisPrngState) {
+        sync.neurogenesis.prng.setState(data.neurogenesisPrngState);
+      } else {
+        sync.neurogenesis.prng = sync.prng.fork(1);
+      }
+      sync.neurogenesis.birthCounter = data.neurogenesisBirthCounter || 0;
 
       sync.syncytiumSteps = data.syncytiumSteps || 0;
       if (data.circadianClock !== undefined) sync.circadianClock = data.circadianClock;
