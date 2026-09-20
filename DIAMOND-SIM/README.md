@@ -56,7 +56,7 @@ Four subsystems ship in two versions so a change can be measured against the cod
 
 | Subsystem | Current | Legacy |
 | --- | --- | --- |
-| Central Complex compass | recurrent E-PG ring attractor, integrates angular velocity | a Gaussian redrawn from a scalar |
+| Central Complex compass | recurrent E-PG ring attractor, estimates heading from turns and drifts | the caller's heading added to a scalar — an oracle, not a model |
 | Mushroom body sparseness | APL feedback inhibition; sparseness emerges from gain | fixed top 15% by sorting |
 | KC→MBON plasticity | dopamine-gated, depression-dominant, with recovery | symmetric Hebbian |
 | Descending output | vote redistributed by threat, gradient and hunger | one fixed weight per role |
@@ -82,7 +82,7 @@ npm run benchmark:connectome -- --arms RandomWalk,Spiking_MB,Syncytium_16B --epi
 
 Every arm runs the same seeds. The report gives paired percentile bootstrap intervals over seed-level differences, probability of improvement, an interquartile mean and tie-split win shares, plus every raw episode and the source hashes that produced them. An interval straddling zero is not evidence either way.
 
-[Recorded results](docs/validation.md#fly-lab-upgraded-circuits-versus-the-legacy-ones): the upgraded circuits beat the ones they replaced by +30.65 net score over 20 seeds, 95% interval [+5.00, +65.62], with every mechanism contributing. In the same arena a single Antennal Lobe brain scores 4.4× the full syncytium and beats it on every metric, so nothing here says sixteen coupled neuropils outperform one.
+[Recorded results](docs/validation.md#fly-lab-upgraded-circuits-versus-the-legacy-ones), read carefully. The legacy compass is handed the fly's true heading, so comparing the whole bundle against it mostly measures whether free heading helps. Holding the compass constant, the other three mechanisms come out at +22.95 over 40 seeds with a 95% interval of [−9.2, +56.0]: pointing positive, inconclusive, and costing nothing while implementing what they are named after. Estimating heading rather than being given it costs 145 net score. And a single Antennal Lobe brain still outscores all sixteen, so nothing here says sixteen coupled neuropils outperform one.
 
 ## Nexus reliability changes
 

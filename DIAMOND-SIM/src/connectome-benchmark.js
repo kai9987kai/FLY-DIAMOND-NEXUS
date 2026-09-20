@@ -448,11 +448,15 @@
       this.heading = 0;
       this.latchAction = -1;
       this.latchTimer = 0;
+      // A fixed celestial azimuth for this world. The sun moves over a day,
+      // but not over a foraging bout, which is what makes it usable as a
+      // reference at all.
+      this.skyReference = (seed % 360) * Math.PI / 180;
     }
     act(sensoryObs, stepDx = 0, stepDy = 0, energy = 100, stepIndex = 0, currentX = 0, currentY = 0, gridSize = 16) {
       const sunAngle = ((stepIndex % 120) / 120) * Math.PI * 2;
       const probs = this.syncytium.step(sensoryObs, turnRate(this, stepDx, stepDy), 0, energy, {
-        dx: 0, dy: 0, dist: 99, sunAngle, stepDx, stepDy
+        dx: 0, dy: 0, dist: 99, sunAngle, skyReference: this.skyReference, stepDx, stepDy
       });
 
       const dxs = [0, 0, -1, 1], dys = [-1, 1, 0, 0];

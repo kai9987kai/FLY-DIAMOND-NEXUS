@@ -860,3 +860,113 @@ test("an empty Kenyon-cell pool settles at no inhibition rather than throwing", 
   const brain = new DrosophilaBrain(0, "forager");
   assert.equal(brain._settleApl([]), 0);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// What each compass mode actually is
+// ─────────────────────────────────────────────────────────────────────────────
+test("the kinematic compass reproduces the caller's heading exactly, estimating nothing", () => {
+  // It adds the caller's angular velocity to a scalar. When that velocity comes
+  // from the true travel direction, as every caller here supplies it, the
+  // network is handed its heading rather than working it out. It is an upper
+  // bound to measure against, not a model.
+  const brain = new DrosophilaBrain(1, "navigator", { compass: "kinematic" });
+  let previous = 0;
+  let worst = 0;
+  for (const heading of [0.3, 1.9, -2.4, 3.0, 0.7, -1.1, 2.8, -0.6, 1.4, -2.9]) {
+    const turn = angleDelta(heading, previous);
+    previous = heading;
+    brain.compassHeading = (brain.compassHeading + turn + 2 * Math.PI) % (2 * Math.PI);
+    worst = Math.max(worst, Math.abs(angleDelta(brain.compassHeading, heading)));
+  }
+  assert.ok(worst < 1e-9, `the oracle compass should be exact, drifted ${worst}`);
+});
+
+test("the ring attractor estimates heading and therefore drifts", () => {
+  const brain = new DrosophilaBrain(1, "navigator");
+  let previous = 0;
+  let worst = 0;
+  for (let t = 0; t < 120; t++) {
+    const heading = Math.sin(t * 0.41) * Math.PI;
+    brain.updateRingAttractor(angleDelta(heading, previous));
+    previous = heading;
+    worst = Math.max(worst, Math.abs(angleDelta(brain.compassHeading, heading)));
+  }
+  assert.ok(worst > 1e-6, "an attractor that never drifts is not estimating anything");
+  assert.ok(worst < Math.PI, `drift of ${(worst * 180 / Math.PI).toFixed(0)} degrees means it lost heading entirely`);
+});
+
+test("only a reference that holds still can anchor the compass", () => {
+  const wander = (referenceFor) => {
+    const brain = new DrosophilaBrain(1, "navigator");
+    let previous = 0;
+    let error = 0;
+    for (let t = 0; t < 200; t++) {
+      const heading = Math.sin(t * 0.37) * Math.PI;
+      const reference = referenceFor(t, heading);
+      brain.updateRingAttractor(angleDelta(heading, previous), reference, reference === null ? 0 : 0.045);
+      previous = heading;
+      error += Math.abs(angleDelta(brain.compassHeading, heading));
+    }
+    return error / 200;
+  };
+
+  const unanchored = wander(() => null);
+  const fixedSky = wander((t, heading) => heading);          // a true fixed reference
+  const sweepingClock = wander(t => ((t % 120) / 120) * 2 * Math.PI);
+
+  assert.ok(fixedSky < unanchored, "a fixed reference must reduce error");
+  assert.ok(
+    sweepingClock > fixedSky,
+    "an angle that sweeps a full circle every period drags the bump instead of pinning it"
+  );
+});
+
+test("the graft supplies a sky reference that does not move during a run", () => {
+  const graft = new MultiAgentGraphGraft(new SixteenFlyBrainSyncytium(2077), 0.55);
+  const env = {
+    agent1X: 5, agent1Y: 5, agent1Energy: 100,
+    agent2X: 9, agent2Y: 9, agent2Energy: 100,
+    agent3X: 14, agent3Y: 2, agent3Energy: 100, gridSize: 20
+  };
+  const reference = graft.skyReference;
+  assert.ok(Number.isFinite(reference));
+  for (let t = 0; t < 30; t++) {
+    env.agent1X = (env.agent1X + 1) % 20;
+    graft.resolveAgents(env, OBS(0.3, 0.3), OBS(0.5, 0.5), OBS(0.7, 0.1));
+    assert.equal(graft.skyReference, reference, "the sky reference must not move during a run");
+  }
+  assert.notEqual(graft.sunAngle, reference, "the sweeping sun angle is a separate signal");
+
+  const other = new MultiAgentGraphGraft(new SixteenFlyBrainSyncytium(19), 0.55);
+  assert.notEqual(other.skyReference, reference, "different worlds get different skies");
+});
+
+test("pre-training strengthens existing claws without growing new ones", () => {
+  const syncytium = new SixteenFlyBrainSyncytium(42);
+  const brain = syncytium.brains[0];
+  const claws = weights => Array.from(weights).filter(v => v > 1e-6).length;
+  const total = weights => Array.from(weights).reduce((a, b) => a + b, 0);
+
+  const clawsBefore = claws(brain.alToKcWeights);
+  const totalBefore = total(brain.alToKcWeights);
+  FlyBrainEngine.PreTrainingEngine.runPreTraining(syncytium, 15);
+
+  assert.equal(
+    claws(brain.alToKcWeights),
+    clawsBefore,
+    "a Kenyon cell samples a few glomeruli; pre-training must not recruit the silent ones"
+  );
+  assert.ok(total(brain.alToKcWeights) > totalBefore, "the claws it does have should strengthen");
+  assert.ok(clawsBefore / brain.KC_BASE_COUNT < 5, "the initial code should be sparse to begin with");
+});
+
+test("pre-training leaves the clock and the per-fly registers where it found them", () => {
+  const syncytium = new SixteenFlyBrainSyncytium(42);
+  FlyBrainEngine.PreTrainingEngine.runPreTraining(syncytium, 15);
+  assert.equal(syncytium.tickCount, 0, "conditioning is not part of the run");
+  assert.equal(syncytium.circadianClock, 0, "an agent should not start its first tick mid-afternoon");
+  assert.equal(syncytium.egoStates.size, 0);
+  assert.equal(syncytium.brains[1].compassHeading, 0, "nor with a compass pointing somewhere it never turned");
+  assert.equal(syncytium.isPretrained, true);
+  assert.equal(syncytium.pretrainingEpochs, 15);
+});

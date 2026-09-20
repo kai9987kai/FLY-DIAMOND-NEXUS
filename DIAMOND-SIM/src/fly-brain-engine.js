@@ -93,9 +93,14 @@
    *
    * compass:     "attractor" - recurrent E-PG/P-EN ring attractor in the CX,
    *                            heading persists in population activity and is
-   *                            integrated from angular velocity.
-   *              "kinematic" - legacy: heading is a scalar the caller sets and
-   *                            the ring is only drawn from it.
+   *                            integrated from angular velocity, with the drift
+   *                            that implies.
+   *              "kinematic" - legacy: the caller's angular velocity is added
+   *                            to a scalar, so when the caller derives it from
+   *                            the true travel direction the network is simply
+   *                            handed its heading, exactly and without drift.
+   *                            Useful as an upper bound; it is not a model of
+   *                            anything, and it scores better for that reason.
    * mbInhibition:"apl"       - APL pools Kenyon-cell output and feeds back
    *                            divisive plus subtractive inhibition, so
    *                            sparseness emerges from gain control.
@@ -856,10 +861,14 @@
       // readout from it. In kinematic (legacy) mode every brain integrates the
       // same scalar independently and the ring is decorative.
       if (this.config.compass === "attractor" && this.role === "navigator") {
-        const sunAnchor = peerContext && Number.isFinite(peerContext.sunAngle)
-          ? peerContext.sunAngle
+        // An anchor stabilises a compass only if it points somewhere fixed in
+        // the world. peerContext.skyReference is that fixed azimuth; the older
+        // sunAngle sweeps a full circle every circadian period, so using it
+        // drags the bump around with the clock rather than pinning it.
+        const anchor = peerContext && Number.isFinite(peerContext.skyReference)
+          ? peerContext.skyReference
           : null;
-        this.updateRingAttractor(headingDelta, sunAnchor, sunAnchor === null ? 0 : 0.045);
+        this.updateRingAttractor(headingDelta, anchor, anchor === null ? 0 : 0.045);
         this.compassRing.set(this.epgRing);
       } else {
         if (this.config.compass !== "attractor") {
@@ -1194,16 +1203,37 @@
       const prng = new MulberryPRNG(syncytium.worldSeed || 101);
 
       for (let ep = 0; ep < epochs; ep++) {
+        // Samples follow the sensory contract the engine is actually given:
+        // bearings as sin/cos pairs on the unit circle, a reward channel that
+        // falls off with distance, bilateral antennae that agree with the
+        // bearing they are sampling. Drawing all fourteen channels from a
+        // uniform distribution instead, with the four bearing channels pinned
+        // to zero, conditions the mushroom body on statistics it will never
+        // see: measured over 40 seeds, that cost 51.60 net score against no
+        // pre-training at all, 95% interval [24.32, 78.70].
+        const rewardBearing = prng.next() * 2 * Math.PI;
+        const hazardBearing = prng.next() * 2 * Math.PI;
+        const rewardDistance = prng.next();
+        const hazardDistance = prng.next();
+        const reward = Math.max(0, 1 - rewardDistance);
+        const hazard = Math.max(0, 1 - hazardDistance) * 0.6;
+        const antennaBias = Math.sin(rewardBearing) * reward * 0.5;
+
         const sensory = [
           prng.next(), prng.next(),
-          prng.next() * 0.8, prng.next() * 0.5,
-          0.5 + prng.next() * 0.5, prng.next(),
-          0, 0,
-          0, 0,
-          0, 0, 0, 0
+          reward,
+          hazard,
+          0.3 + prng.next() * 0.9,
+          rewardDistance,
+          Math.sin(rewardBearing), Math.cos(rewardBearing),
+          Math.sin(hazardBearing), Math.cos(hazardBearing),
+          (prng.next() - 0.5) * 0.4, (prng.next() - 0.5) * 0.4,
+          Math.max(0, reward * 0.6 + antennaBias),
+          Math.max(0, reward * 0.6 - antennaBias)
         ];
 
-        const headingShift = (Math.PI * 2 / epochs) * (ep % 8);
+        // Turn rates the animal can produce, not arbitrary reorientations.
+        const headingShift = (prng.next() - 0.5) * Math.PI;
         syncytium.step(sensory, headingShift, 0.05, 90);
 
         for (let b = 0; b < syncytium.brainCount; b++) {
@@ -1213,7 +1243,16 @@
             if (preAct > 0.2) {
               const offset = k * brain.GLOMERULI_COUNT;
               for (let g = 0; g < brain.GLOMERULI_COUNT; g++) {
-                brain.alToKcWeights[offset + g] = clamp(brain.alToKcWeights[offset + g] + 0.005 * brain.alProjection[g], 0.1, 1.2);
+                // Strengthen the claws this cell has; do not grow it new ones.
+                // A Kenyon cell samples a few glomeruli, and that is what makes
+                // the representation sparse and separable. Clamping every
+                // synapse up to a floor recruited the silent ones instead:
+                // claws per cell went from 3.5 to 7.7 over a short
+                // pre-training run, and the arm scored worse than with no
+                // pre-training at all.
+                const weight = brain.alToKcWeights[offset + g];
+                if (weight <= 0) continue;
+                brain.alToKcWeights[offset + g] = clamp(weight + 0.005 * brain.alProjection[g], 0.01, 1.2);
               }
             }
           }
@@ -1223,6 +1262,23 @@
           onProgress(Math.round(((ep + 1) / epochs) * 100));
         }
       }
+
+      // Pre-training is a conditioning phase, not part of the run: leave the
+      // clock and the per-fly registers where a fresh syncytium would have
+      // them, so an agent does not start its first tick mid-afternoon with a
+      // compass pointing somewhere it never turned.
+      syncytium.tickCount = 0;
+      syncytium.syncytiumSteps = 0;
+      syncytium.circadianClock = 0;
+      syncytium.pdfArousal = 1.0;
+      syncytium._tickOpen = false;
+      syncytium._tickAuto = false;
+      for (let i = 0; i < syncytium.brains.length; i++) {
+        syncytium.brains[i].restoreEgo(syncytium._pristineEgo[i]);
+      }
+      syncytium.egoStates.clear();
+      syncytium.egoValues.clear();
+      syncytium.activeEgoId = null;
 
       syncytium.isPretrained = true;
       syncytium.pretrainingEpochs = epochs;
@@ -1788,6 +1844,11 @@
       this.graftInfluence = clamp(graftInfluence, 0, 1);
       this.actionNames = ["up", "down", "left", "right"];
       this.sunAngle = 0;
+      // A fixed celestial azimuth for this world. The sun moves over a day but
+      // not over a foraging bout, and only something that holds still can
+      // anchor a compass; sunAngle, which sweeps a full circle every circadian
+      // period, cannot.
+      this.skyReference = ((this.syncytium.worldSeed || 0) % 360) * Math.PI / 180;
 
       // Agent 1: Harvester (Appetitive forage specialist)
       this.agent1 = {
@@ -2046,7 +2107,7 @@
       const motion1 = this._resolveHeading(this.agent1, stepDx1, stepDy1);
       const h1 = motion1.heading;
       const flyProbs1 = this.syncytium.step(agent1Obs, motion1.angularVelocity, 0, env.agent1Energy, {
-        dx: dx12, dy: dy12, dist: peerDist, sunAngle, stepDx: stepDx1, stepDy: stepDy1
+        dx: dx12, dy: dy12, dist: peerDist, sunAngle, skyReference: this.skyReference, stepDx: stepDx1, stepDy: stepDy1
       }, EGO_AGENT1);
       this.agent1.lastHeading = h1;
       this.agent1.lastFlyProbabilities = flyProbs1;
@@ -2083,7 +2144,7 @@
       const motion2 = this._resolveHeading(this.agent2, stepDx2, stepDy2);
       const h2 = motion2.heading;
       const flyProbs2 = this.syncytium.step(agent2Obs, motion2.angularVelocity, 0.5, env.agent2Energy, {
-        dx: -dx12, dy: -dy12, dist: peerDist, sunAngle, stepDx: stepDx2, stepDy: stepDy2
+        dx: -dx12, dy: -dy12, dist: peerDist, sunAngle, skyReference: this.skyReference, stepDx: stepDx2, stepDy: stepDy2
       }, EGO_AGENT2);
       this.agent2.lastHeading = h2;
       this.agent2.lastFlyProbabilities = flyProbs2;
@@ -2122,7 +2183,7 @@
         const motion3 = this._resolveHeading(this.agent3, stepDx3, stepDy3);
         const h3 = motion3.heading;
         const flyProbs3 = this.syncytium.step(agent3Obs, motion3.angularVelocity, 0.3, env.agent3Energy || 100, {
-          dx: dx31, dy: dy31, dist: dist31, sunAngle, stepDx: stepDx3, stepDy: stepDy3
+          dx: dx31, dy: dy31, dist: dist31, sunAngle, skyReference: this.skyReference, stepDx: stepDx3, stepDy: stepDy3
         }, EGO_AGENT3);
         this.agent3.lastHeading = h3;
         this.agent3.lastFlyProbabilities = flyProbs3;
