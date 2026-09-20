@@ -223,3 +223,29 @@ test("a single seed is rejected rather than reported as an interval-free compari
   const fallback = await runner.runComparativeBenchmark({ seeds: [], episodesPerArm: 2, stepLimit: 5 });
   assert.equal(fallback.seeds.length, 2, "an empty list falls back to the default seeds");
 });
+
+test("the 22-module benchmark keeps a distinct reproducible 16-module comparator", async () => {
+  const runner = new ConnectomeBenchmarkRunner();
+  const baseline = runner._createPolicy('Syncytium_16B', 47);
+  const expanded = runner._createPolicy('Syncytium_22B', 47);
+  assert.equal(baseline.syncytium.brainCount, 16);
+  assert.equal(expanded.syncytium.brainCount, 22);
+  assert.deepEqual(runner.runEpisode('Syncytium_22B', 47, 40), runner.runEpisode('Syncytium_22B', 47, 40));
+  const report = await runner.runComparativeBenchmark({
+    arms: ['Syncytium_16B', 'Syncytium_22B'], reference: 'Syncytium_16B', seeds: [29, 47], stepLimit: 20
+  });
+  assert.equal(report.comparisons[0].arm, 'Syncytium_22B');
+  assert.equal(report.comparisons[0].ci95.length, 2);
+});
+
+test("benchmark reinforcement credits executed actions after policy latching", () => {
+  const runner = new ConnectomeBenchmarkRunner();
+  let credited = -1, decisions = 0;
+  runner._createPolicy = () => ({
+    syncytium: {setExecutedAction(action) {credited = action;}},
+    act() {decisions++; return decisions % 4;},
+    reinforce() {assert.equal(credited, decisions % 4);}
+  });
+  runner.runEpisode('Syncytium_16B', 47, 40);
+  assert.equal(credited, decisions % 4);
+});

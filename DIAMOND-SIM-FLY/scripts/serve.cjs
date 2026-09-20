@@ -1,9 +1,12 @@
 // Local-only static server. No installation or build required.
 const http=require('node:http'),fs=require('node:fs'),path=require('node:path');
+const {createBridgeHandler}=require('./supermix-bridge.cjs');
 const root=path.resolve(__dirname,'..'),port=Number(process.env.PORT||8080);
+const bridge=createBridgeHandler();
 const types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.md':'text/plain','.png':'image/png','.svg':'image/svg+xml'};
-http.createServer((req,res)=>{
+const server=http.createServer(async(req,res)=>{
   try {
+    if(await bridge(req,res)) return;
     const url=new URL(req.url,'http://localhost'),relative=decodeURIComponent(url.pathname);
     const file=path.resolve(root,'.'+(relative==='/'?'/index.html':relative));
     if(!file.startsWith(root+path.sep)||relative.split(/[\\/]/).some(p=>p.startsWith('.'))||!['GET','HEAD'].includes(req.method)) {res.writeHead(403);res.end();return;}
@@ -13,4 +16,7 @@ http.createServer((req,res)=>{
       if(req.method==='HEAD') res.end();else fs.createReadStream(file).pipe(res);
     });
   } catch {res.writeHead(400);res.end('Bad request');}
-}).listen(port,'127.0.0.1',()=>console.log(`DIAMOND SIM: http://127.0.0.1:${port}`));
+});
+server.requestTimeout=8000;
+server.headersTimeout=5000;
+server.listen(port,'127.0.0.1',()=>console.log(`DIAMOND SIM: http://127.0.0.1:${port}`));

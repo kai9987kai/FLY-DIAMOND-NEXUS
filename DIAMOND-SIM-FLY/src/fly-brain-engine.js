@@ -83,7 +83,9 @@
     vault: "support",     // memory readout
     vnc_cpg: "support",   // gait rhythm
     ammc: "support",      // peer spacing
-    no: "support"         // odometry and homing
+    no: "support",        // odometry and homing
+    plume: "goal", climate: "reflex", threat_forecast: "reflex",
+    route_memory: "goal", uncertainty: "explore", social: "support"
   });
 
   /**
@@ -1322,7 +1324,7 @@
         "smp"         // Brain 15: Superior Medial Protocerebrum action commitment latch
       ];
 
-      this.brainCount = 16;
+      this.brainCount = this.roles.length;
       this.brains = [];
       for (let i = 0; i < this.brainCount; i++) {
         this.brains.push(new DrosophilaBrain(i, this.roles[i], this.config));
@@ -1428,12 +1430,12 @@
     }
 
     _initCommissuralWeights() {
-      const weights = new Float32Array(16 * 16 * 4);
-      for (let src = 0; src < 16; src++) {
-        for (let dst = 0; dst < 16; dst++) {
+      const weights = new Float32Array(this.brainCount * this.brainCount * 4);
+      for (let src = 0; src < this.brainCount; src++) {
+        for (let dst = 0; dst < this.brainCount; dst++) {
           if (src === dst) continue;
           for (let a = 0; a < 4; a++) {
-            const idx = (src * 16 + dst) * 4 + a;
+            const idx = (src * this.brainCount + dst) * 4 + a;
             weights[idx] = 0.08;
           }
         }
@@ -1562,6 +1564,7 @@
         }
 
         const modulatedSensory = sensoryInput.slice();
+        if (sensoryInput.environment) modulatedSensory.environment = sensoryInput.environment;
         if (brain.role === "forager") {
           modulatedSensory[4] = (modulatedSensory[4] || 0) * 1.3;
         } else if (brain.role === "sentinel") {
@@ -1580,7 +1583,7 @@
         for (let dst = 0; dst < this.brainCount; dst++) {
           if (src === dst) continue;
           for (let a = 0; a < 4; a++) {
-            const w = this.commissuralWeights[(src * 16 + dst) * 4 + a];
+            const w = this.commissuralWeights[(src * this.brainCount + dst) * 4 + a];
             commInteractions[dst][a] += individualOutputs[src][a] * w;
           }
         }
@@ -1657,6 +1660,11 @@
         }
       }
 
+      // The 22-circuit extension keeps the original 16-vote output scale.
+      // Changing the graph size must not implicitly change softmax temperature.
+      if (this.normalizedConsensus) {
+        for (let a = 0; a < 4; a++) consensusLogits[a] *= 16 / this.brainCount;
+      }
       this.lastEstimatedValue = (consensusLogits[0] + consensusLogits[1] + consensusLogits[2] + consensusLogits[3]) / 4;
 
       // The channel this syncytium favoured. A caller that then executes a
@@ -1820,6 +1828,194 @@
     }
   }
 
+  const SPECIALIST_ROLES = Object.freeze([
+    "plume", "climate", "threat_forecast", "route_memory", "uncertainty", "social"
+  ]);
+  const ACTION_VECTORS = Object.freeze([[0, -1], [0, 1], [-1, 0], [1, 0]]);
+  const finite = (value, fallback = 0) => Number.isFinite(value) ? value : fallback;
+
+  /** Six bounded engineering heuristics, not additional biological connectomes. */
+  class SpecialistBrain extends DrosophilaBrain {
+    constructor(id, role, config) {
+      super(id, role, config);
+      // Registers 0..7 are temporal estimates; the remaining 256 hold a coarse
+      // visitation map. Stored with each fly's ego, never shared between bodies.
+      this.specialistMemory = new Float32Array(264);
+      this.specialistActivity = 0;
+    }
+
+    captureEgo(into = null) {
+      const ego = super.captureEgo(into);
+      if (!ego.arrays.specialistMemory) ego.arrays.specialistMemory = new Float32Array(264);
+      ego.arrays.specialistMemory.set(this.specialistMemory);
+      ego.scalars.specialistActivity = this.specialistActivity;
+      return ego;
+    }
+
+    restoreEgo(ego) {
+      super.restoreEgo(ego);
+      if (ego && ego.arrays.specialistMemory) this.specialistMemory.set(ego.arrays.specialistMemory);
+      this.specialistActivity = ego ? finite(ego.scalars.specialistActivity) : 0;
+    }
+
+    forward(sensory, headingDelta = 0, executiveContext = null, peerContext = null) {
+      super.forward(sensory, headingDelta, executiveContext, peerContext);
+      const environment = sensory.environment || (peerContext && peerContext.environment) || {};
+      const memory = this.specialistMemory;
+      const scent = clamp(finite(sensory[2]), 0, 1);
+      const hazard = clamp(finite(sensory[3]), 0, 1);
+      const energy = clamp(finite(sensory[4], 0.8), 0, 1);
+      const foodX = finite(sensory[7]), foodY = finite(sensory[6]);
+      const hazardX = finite(sensory[9]), hazardY = finite(sensory[8]);
+      const threatRise = Math.max(0, hazard - memory[0]);
+      memory[0] = hazard;
+      const x = clamp(finite(sensory[0], 0.5), 0, 1);
+      const y = clamp(finite(sensory[1], 0.5), 0, 1);
+      const cellX = Math.min(15, Math.floor(x * 16));
+      const cellY = Math.min(15, Math.floor(y * 16));
+      const cell = 8 + cellY * 16 + cellX;
+      memory[cell] = Math.min(255, memory[cell] + 1);
+      // Deterministic tie breaking depends on the body's experienced trajectory.
+      memory[1]++;
+      memory[2] = 0.75 * memory[2] + 0.25 * scent;
+      const windX = clamp(finite(environment.windX), -2, 2);
+      const windY = clamp(finite(environment.windY), -2, 2);
+      const windMagnitude = Math.hypot(windX, windY);
+      const heat = clamp((finite(environment.temperature, 22) - 26) / 12, 0, 1);
+      const cold = clamp((16 - finite(environment.temperature, 22)) / 12, 0, 1);
+      const dryness = clamp((0.5 - finite(environment.humidity, 0.6)) * 2, 0, 1);
+      // Slow hydration debt recovers in humid conditions or near supplied water.
+      memory[3] = clamp(memory[3] + (dryness + heat) * 0.025
+        - finite(environment.waterProximity) * 0.06 - (dryness === 0 ? 0.01 : 0), 0, 1);
+      const predator = clamp(finite(environment.predatorProximity), 0, 1);
+      const predatorBearing = finite(environment.predatorBearing);
+      const forecast = clamp(hazard + threatRise * 2, 0, 1);
+      const scores = [0, 0, 0, 0];
+      for (let a = 0; a < 4; a++) {
+        const [dx, dy] = ACTION_VECTORS[a];
+        const foodAlignment = dx * foodX + dy * foodY;
+        const away = -(dx * hazardX + dy * hazardY);
+        const nx = clamp(cellX + dx, 0, 15), ny = clamp(cellY + dy, 0, 15);
+        const visits = memory[8 + ny * 16 + nx];
+        switch (this.role) {
+          case "plume": {
+            const upstream = windMagnitude > 0.001 ? -(dx * windX + dy * windY) / windMagnitude : 0;
+            const cast = Math.sin(memory[1] * 0.5) * (dx * windY - dy * windX);
+            scores[a] = scent * foodAlignment + memory[2] * 0.8 * upstream
+              + (scent < 0.05 ? memory[2] * 0.5 * cast : 0);
+            break;
+          }
+          case "climate": {
+            const angle = Math.atan2(dy, dx);
+            const refuge = Number.isFinite(environment.refugeBearing)
+              ? Math.cos(angle - environment.refugeBearing) * finite(environment.refugeProximity) : 0;
+            const water = Number.isFinite(environment.waterBearing)
+              ? Math.cos(angle - environment.waterBearing) * finite(environment.waterProximity) : 0;
+            scores[a] = (heat + cold) * refuge + memory[3] * 1.5 * water
+              + (1 - energy) * 0.4 * scent * foodAlignment;
+            break;
+          }
+          case "threat_forecast":
+            scores[a] = forecast * 1.6 * away
+              - predator * 1.8 * (dx * Math.cos(predatorBearing) + dy * Math.sin(predatorBearing));
+            break;
+          case "route_memory":
+            scores[a] = -(Math.log1p(visits) / Math.log(256)) * (1 - scent) * 0.8
+              + scent * foodAlignment * (1 + (1 - energy) * 0.6);
+            break;
+          case "uncertainty": {
+            const unknown = 1 / (1 + visits);
+            const uncertainty = clamp(1 - scent - hazard, 0, 1);
+            scores[a] = uncertainty * unknown * 0.9
+              + uncertainty * 0.12 * Math.cos(memory[1] * 0.19 + a * Math.PI / 2)
+              + forecast * away;
+            break;
+          }
+          case "social": {
+            const distance = finite(peerContext && peerContext.dist, 999);
+            const peerX = finite(peerContext && peerContext.dx), peerY = finite(peerContext && peerContext.dy);
+            // Repulsion removes resource crowding; distant peers never become
+            // an unlimited attraction target or an energy-farming objective.
+            const spacing = distance < 4 ? -(dx * peerX + dy * peerY) / Math.max(1, distance) : 0;
+            scores[a] = spacing * (1 - distance / 4) * 0.9 + hazard * away * 0.5;
+            break;
+          }
+        }
+        this.descendingOutputs[a] = clamp(scores[a] + 0.15 * finite(this.mbonActivations[a]), -2, 2);
+      }
+      this.specialistActivity = Math.max(...scores) - Math.min(...scores);
+      return this.descendingOutputs;
+    }
+  }
+
+  class TwentyTwoFlyBrainSyncytium extends SixteenFlyBrainSyncytium {
+    constructor(worldSeed = 42, config = null) {
+      super(worldSeed, config);
+      this.roles.push(...SPECIALIST_ROLES);
+      for (let i = 16; i < this.roles.length; i++) {
+        this.brains.push(new SpecialistBrain(i, this.roles[i], this.config));
+      }
+      this.brainCount = this.brains.length;
+      this.normalizedConsensus = true;
+      this.config.couplingStrength = clamp(finite(this.config.couplingStrength, 0.8), 0, 2);
+      this.commissuralWeights = this._initCommissuralWeights();
+      this._pristineEgo = this.brains.map(brain => brain.captureEgo());
+    }
+
+    _initCommissuralWeights() {
+      const n = this.brainCount;
+      const weights = new Float32Array(n * n * 4);
+      const strength = clamp(finite(this.config.couplingStrength, 0.8), 0, 2);
+      // Dense directional projections favour related groups, while each target
+      // receives an L1-normalized input budget independent of graph size.
+      for (let dst = 0; dst < n; dst++) {
+        let total = 0;
+        for (let src = 0; src < n; src++) {
+          if (src === dst) continue;
+          const affinity = DESCENDING_GROUPS[this.roles[src]] === DESCENDING_GROUPS[this.roles[dst]] ? 1.5 : 1;
+          total += affinity;
+          for (let a = 0; a < 4; a++) weights[(src * n + dst) * 4 + a] = affinity;
+        }
+        for (let src = 0; src < n; src++) {
+          for (let a = 0; a < 4; a++) weights[(src * n + dst) * 4 + a] *= strength / total;
+        }
+      }
+      return weights;
+    }
+
+    setCouplingStrength(strength) {
+      if (!Number.isFinite(strength) || strength < 0 || strength > 2) return false;
+      this.config.couplingStrength = strength;
+      this.commissuralWeights = this._initCommissuralWeights();
+      return true;
+    }
+
+    getTelemetry() {
+      const telemetry = super.getTelemetry();
+      let directedPairs = 0, actionSynapses = 0;
+      for (let src = 0; src < this.brainCount; src++) {
+        for (let dst = 0; dst < this.brainCount; dst++) {
+          let connected = false;
+          for (let a = 0; a < 4; a++) {
+            if (this.commissuralWeights[(src * this.brainCount + dst) * 4 + a] !== 0) {
+              connected = true;
+              actionSynapses++;
+            }
+          }
+          if (connected) directedPairs++;
+        }
+      }
+      telemetry.graph = {
+        directedPairs, actionSynapses,
+        density: directedPairs / (this.brainCount * (this.brainCount - 1)),
+        couplingStrength: this.config.couplingStrength,
+        normalized: true
+      };
+      telemetry.specialists = Object.fromEntries(this.brains.slice(16).map(b => [b.role, b.specialistActivity]));
+      return telemetry;
+    }
+  }
+
   // Aliases for full backward compatibility
   const ElevenFlyBrainSyncytium = SixteenFlyBrainSyncytium;
   const EightFlyBrainSyncytium = SixteenFlyBrainSyncytium;
@@ -1920,6 +2116,70 @@
       this.triSwarmResonanceEvents = 0; // Triangular 3-agent acoustic swarm events
       this.giantFiberEvents = 0; // Giant Fiber emergency looming escape saccades
       this.beaconWaypoints = []; // Cartographer luminescent beacon waypoints
+      this.externalAdvice = null;
+      this.lastAdviceReceipt = null;
+    }
+
+    /** Bounded, optional advisory policy; never evaluated as code or as a command.
+     * tick is the observation tick; only ticks tick+1 through tick+ttl may use it.
+     * Invalid replacement packets clear the previous advice (fail closed).
+     */
+    setExternalAdvice(payload) {
+      this.externalAdvice = null;
+      if (!payload || typeof payload !== "object" || !Number.isInteger(payload.tick)
+        || payload.tick < 0 || payload.tick > this.syncytium.tickCount
+        || !Number.isInteger(payload.ttl) || payload.ttl < 1 || payload.ttl > 30
+        || payload.tick + payload.ttl <= this.syncytium.tickCount
+        || !Number.isFinite(payload.influence) || payload.influence < 0 || payload.influence > 0.35
+        || !payload.agents || typeof payload.agents !== "object" || Array.isArray(payload.agents)) return false;
+      const keys = Object.keys(payload.agents);
+      if (!keys.length || keys.some(key => ![EGO_AGENT1, EGO_AGENT2, EGO_AGENT3].includes(key))) return false;
+      const agents = {};
+      for (const key of keys) {
+        const scores = payload.agents[key];
+        if (!Array.isArray(scores) || scores.length !== 4
+          || !scores.every(value => Number.isFinite(value) && value >= -1 && value <= 1)) return false;
+        agents[key] = scores.slice();
+      }
+      this.externalAdvice = {
+        tick: payload.tick, ttl: payload.ttl, influence: payload.influence, agents,
+        source: typeof payload.source === "string" ? payload.source.slice(0, 120) : "external",
+        model: typeof payload.model === "string" ? payload.model.slice(0, 120) : null
+      };
+      return true;
+    }
+
+    clearExternalAdvice() {
+      this.externalAdvice = null;
+      this.lastAdviceReceipt = null;
+    }
+
+    _advise(scores, egoId, observation) {
+      const packet = this.externalAdvice;
+      const tick = this.syncytium.tickCount;
+      if (!packet || tick <= packet.tick) return scores;
+      if (tick > packet.tick + packet.ttl) {
+        this.externalAdvice = null;
+        return scores;
+      }
+      if (!packet.agents[egoId]) return scores;
+      // Immediate threat evidence retains authority over optional advice.
+      const influence = packet.influence * (1 - clamp(finite(observation[3]), 0, 1));
+      const adjusted = scores.map((value, action) => value + influence * packet.agents[egoId][action]);
+      this.lastAdviceReceipt = { source: packet.source, model: packet.model, observationTick: packet.tick, appliedTick: tick };
+      return adjusted;
+    }
+
+    _peerEnvironment(env, key) {
+      return (env.environmentByAgent && env.environmentByAgent[key]) || env.environment || {};
+    }
+
+    _holdCommitment(agent, scores) {
+      // The 16-circuit comparator retains its original commitment policy. New
+      // mode releases a stale latch when a new target/threat materially wins.
+      if (!this.syncytium.normalizedConsensus) return true;
+      const previous = scores[agent.committedAction];
+      return !agent.isStasisHazard && Number.isFinite(previous) && Math.max(...scores) - previous < 0.045;
     }
 
     /**
@@ -1951,7 +2211,8 @@
       if (!bounds) return true;
       const nx = x + [0, 0, -1, 1][action];
       const ny = y + [-1, 1, 0, 0][action];
-      return nx >= 0 && nx < bounds.width && ny >= 0 && ny < bounds.height;
+      return nx >= 0 && nx < bounds.width && ny >= 0 && ny < bounds.height
+        && !(bounds.walls || []).some(wall => wall.x === nx && wall.y === ny);
     }
 
     /**
@@ -1961,9 +2222,9 @@
     _boundsOf(env) {
       if (!env) return null;
       if (Number.isFinite(env.width) && Number.isFinite(env.height)) {
-        return { width: env.width, height: env.height };
+        return { width: env.width, height: env.height, walls: env.walls };
       }
-      if (Number.isFinite(env.gridSize)) return { width: env.gridSize, height: env.gridSize };
+      if (Number.isFinite(env.gridSize)) return { width: env.gridSize, height: env.gridSize, walls: env.walls };
       return null;
     }
 
@@ -1990,7 +2251,7 @@
 
     _updateAgentRegime(agentData, sensoryState) {
       const hazardSense = sensoryState[3] || 0;
-      const energyNorm = sensoryState[4] || 0.5;
+      const energyNorm = finite(sensoryState[4], 0.5);
       const rewardSense = sensoryState[2] || 0;
 
       if (hazardSense > 0.45) {
@@ -2107,7 +2368,8 @@
       const motion1 = this._resolveHeading(this.agent1, stepDx1, stepDy1);
       const h1 = motion1.heading;
       const flyProbs1 = this.syncytium.step(agent1Obs, motion1.angularVelocity, 0, env.agent1Energy, {
-        dx: dx12, dy: dy12, dist: peerDist, sunAngle, skyReference: this.skyReference, stepDx: stepDx1, stepDy: stepDy1
+        dx: dx12, dy: dy12, dist: peerDist, sunAngle, skyReference: this.skyReference, stepDx: stepDx1, stepDy: stepDy1,
+        environment: this._peerEnvironment(env, EGO_AGENT1)
       }, EGO_AGENT1);
       this.agent1.lastHeading = h1;
       this.agent1.lastFlyProbabilities = flyProbs1;
@@ -2124,13 +2386,14 @@
       for (let a = 0; a < 4; a++) {
         combProbs1[a] = (1 - dynamicBeta1) * agent1Logits[a] + dynamicBeta1 * flyProbs1[a];
       }
-      const finalProbs1 = softmax(combProbs1, 0.8);
+      const finalProbs1 = softmax(this._advise(combProbs1, EGO_AGENT1, agent1Obs), 0.8);
       let maxA1 = this._bestLegalAction(finalProbs1, env.agent1X, env.agent1Y, bounds);
 
       if (this.agent1.isGFEscape) {
         this.agent1.committedAction = maxA1;
         this.agent1.commitmentTimer = 0;
       } else if (this.agent1.commitmentTimer > 0 && this.agent1.behavioralRegime !== "EVADE"
+        && this._holdCommitment(this.agent1, finalProbs1)
         && this._isLegal(this.agent1.committedAction, env.agent1X, env.agent1Y, bounds)) {
         this.agent1.commitmentTimer--;
         maxA1 = this.agent1.committedAction;
@@ -2144,7 +2407,8 @@
       const motion2 = this._resolveHeading(this.agent2, stepDx2, stepDy2);
       const h2 = motion2.heading;
       const flyProbs2 = this.syncytium.step(agent2Obs, motion2.angularVelocity, 0.5, env.agent2Energy, {
-        dx: -dx12, dy: -dy12, dist: peerDist, sunAngle, skyReference: this.skyReference, stepDx: stepDx2, stepDy: stepDy2
+        dx: -dx12, dy: -dy12, dist: peerDist, sunAngle, skyReference: this.skyReference, stepDx: stepDx2, stepDy: stepDy2,
+        environment: this._peerEnvironment(env, EGO_AGENT2)
       }, EGO_AGENT2);
       this.agent2.lastHeading = h2;
       this.agent2.lastFlyProbabilities = flyProbs2;
@@ -2161,13 +2425,14 @@
       for (let a = 0; a < 4; a++) {
         combProbs2[a] = (1 - dynamicBeta2) * agent2Logits[a] + dynamicBeta2 * flyProbs2[a];
       }
-      const finalProbs2 = softmax(combProbs2, 0.8);
+      const finalProbs2 = softmax(this._advise(combProbs2, EGO_AGENT2, agent2Obs), 0.8);
       let maxA2 = this._bestLegalAction(finalProbs2, env.agent2X, env.agent2Y, bounds);
 
       if (this.agent2.isGFEscape) {
         this.agent2.committedAction = maxA2;
         this.agent2.commitmentTimer = 0;
       } else if (this.agent2.commitmentTimer > 0 && this.agent2.behavioralRegime !== "EVADE"
+        && this._holdCommitment(this.agent2, finalProbs2)
         && this._isLegal(this.agent2.committedAction, env.agent2X, env.agent2Y, bounds)) {
         this.agent2.commitmentTimer--;
         maxA2 = this.agent2.committedAction;
@@ -2182,8 +2447,9 @@
         this._updateAgentRegime(this.agent3, agent3Obs);
         const motion3 = this._resolveHeading(this.agent3, stepDx3, stepDy3);
         const h3 = motion3.heading;
-        const flyProbs3 = this.syncytium.step(agent3Obs, motion3.angularVelocity, 0.3, env.agent3Energy || 100, {
-          dx: dx31, dy: dy31, dist: dist31, sunAngle, skyReference: this.skyReference, stepDx: stepDx3, stepDy: stepDy3
+        const flyProbs3 = this.syncytium.step(agent3Obs, motion3.angularVelocity, 0.3, finite(env.agent3Energy, 100), {
+          dx: dx31, dy: dy31, dist: dist31, sunAngle, skyReference: this.skyReference, stepDx: stepDx3, stepDy: stepDy3,
+          environment: this._peerEnvironment(env, EGO_AGENT3)
         }, EGO_AGENT3);
         this.agent3.lastHeading = h3;
         this.agent3.lastFlyProbabilities = flyProbs3;
@@ -2199,13 +2465,14 @@
         for (let a = 0; a < 4; a++) {
           combProbs3[a] = (1 - dynamicBeta3) * agent3Logits[a] + dynamicBeta3 * flyProbs3[a];
         }
-        finalProbs3 = softmax(combProbs3, 0.8);
+        finalProbs3 = softmax(this._advise(combProbs3, EGO_AGENT3, agent3Obs), 0.8);
         maxA3 = this._bestLegalAction(finalProbs3, env.agent3X, env.agent3Y, bounds);
 
         if (this.agent3.isGFEscape) {
           this.agent3.committedAction = maxA3;
           this.agent3.commitmentTimer = 0;
         } else if (this.agent3.commitmentTimer > 0 && this.agent3.behavioralRegime !== "EVADE"
+          && this._holdCommitment(this.agent3, finalProbs3)
           && this._isLegal(this.agent3.committedAction, env.agent3X, env.agent3Y, bounds)) {
           this.agent3.commitmentTimer--;
           maxA3 = this.agent3.committedAction;
@@ -2348,9 +2615,10 @@
       for (let a = 0; a < 4; a++) {
         comb[a] = (1 - dynamicBeta) * agentActionLogits[a] + dynamicBeta * flyProbs[a];
       }
-      const finalProbs = softmax(comb, 0.8);
+      const finalProbs = softmax(this._advise(comb, EGO_AGENT1, agentState), 0.8);
       let maxIdx = 0;
       for (let a = 1; a < 4; a++) if (finalProbs[a] > finalProbs[maxIdx]) maxIdx = a;
+      this.syncytium.setExecutedAction(maxIdx, EGO_AGENT1);
 
       return {
         action: this.actionNames[maxIdx],
@@ -2505,11 +2773,196 @@
         }))
       };
 
+      if (sync instanceof TwentyTwoFlyBrainSyncytium) {
+        stateObj.version = "8.0.0";
+        stateObj.brainCount = sync.brainCount;
+        stateObj.roles = sync.roles.slice();
+        stateObj.exactState = {
+          // Baseline v7 omits trained AL weights and several body registers.
+          // v8 records them, including specialty memory and commitment timers.
+          alToKcWeights: sync.brains.map(brain => Array.from(brain.alToKcWeights)),
+          brainEgos: sync.brains.map(brain => {
+            const ego = brain.captureEgo();
+            return {
+              scalars: Object.assign({}, ego.scalars),
+              arrays: Object.fromEntries(Object.entries(ego.arrays).map(([key, value]) => [key, Array.from(value)])),
+              born: Array.from(ego.born)
+            };
+          }),
+          targetVectors: sync.brains.map(brain => Object.assign({}, brain.targetVector)),
+          egoValues: Array.from(sync.egoValues),
+          activeEgoId: sync.activeEgoId,
+          lastEstimatedValue: sync.lastEstimatedValue,
+          lastDescendingGains: sync.lastDescendingGains ? Array.from(sync.lastDescendingGains) : null,
+          pdfArousal: sync.pdfArousal,
+          circadianPeriod: sync.circadianPeriod,
+          tdGamma: sync.tdGamma,
+          tickOpen: sync._tickOpen, tickAuto: sync._tickAuto,
+          neurogenesisMax: sync.neurogenesis.maxBornPerBrain,
+          graftAgents: [graft.agent1, graft.agent2, graft.agent3],
+          skyReference: graft.skyReference,
+          graftConfig: Object.fromEntries([
+            "stasisThreshold", "stasisEnergyDrain", "socialRefractory", "handshakeEnergy", "triSwarmEnergy"
+          ].map(key => [key, graft[key]])),
+          // Advice is data pinned to simulation ticks, so replay consults the
+          // same bounded packet without contacting the external provider.
+          externalAdvice: graft.externalAdvice,
+          lastAdviceReceipt: graft.lastAdviceReceipt
+        };
+      }
       return JSON.stringify(stateObj);
     }
 
     static deserialize(graft, stateData) {
       const data = typeof stateData === "string" ? JSON.parse(stateData) : stateData;
+      const isExtended = graft.syncytium instanceof TwentyTwoFlyBrainSyncytium;
+      if (data && data.version === "8.0.0") {
+        if (!isExtended) throw new Error("22-brain state requires a 22-brain syncytium");
+        const candidate = new MultiAgentGraphGraft(new TwentyTwoFlyBrainSyncytium(data.worldSeed, data.config));
+        this._validateExtended(data, candidate);
+        this._restore(candidate, data);
+        const exact = data.exactState;
+        const sync = candidate.syncytium;
+        for (let i = 0; i < sync.brainCount; i++) {
+          sync.brains[i].alToKcWeights.set(exact.alToKcWeights[i]);
+          sync.brains[i].restoreEgo(exact.brainEgos[i]);
+          sync.brains[i].targetVector = Object.assign({}, exact.targetVectors[i]);
+        }
+        sync.egoValues = new Map(exact.egoValues);
+        sync.activeEgoId = exact.activeEgoId;
+        sync.lastEstimatedValue = exact.lastEstimatedValue;
+        sync.lastDescendingGains = exact.lastDescendingGains ? Float32Array.from(exact.lastDescendingGains) : null;
+        sync.pdfArousal = exact.pdfArousal;
+        sync.circadianPeriod = exact.circadianPeriod;
+        sync.tdGamma = exact.tdGamma;
+        sync._tickOpen = exact.tickOpen;
+        sync._tickAuto = exact.tickAuto;
+        sync.neurogenesis.maxBornPerBrain = exact.neurogenesisMax;
+        [candidate.agent1, candidate.agent2, candidate.agent3] = exact.graftAgents.map(agent => Object.assign({}, agent));
+        candidate.skyReference = exact.skyReference;
+        Object.assign(candidate, exact.graftConfig);
+        candidate.externalAdvice = exact.externalAdvice ? JSON.parse(JSON.stringify(exact.externalAdvice)) : null;
+        candidate.lastAdviceReceipt = exact.lastAdviceReceipt ? Object.assign({}, exact.lastAdviceReceipt) : null;
+        // Commit only after complete validation and restoration. Preserve the
+        // original syncytium identity held by the UI and other callers.
+        Object.assign(graft.syncytium, sync);
+        candidate.syncytium = graft.syncytium;
+        Object.assign(graft, candidate);
+        return data.extraAgentData || {};
+      }
+      if (isExtended) throw new Error("Legacy snapshots require the 16-brain baseline; partial 22-brain restores are unsupported");
+      return this._restore(graft, data);
+    }
+
+    static _validateExtended(data, candidate) {
+      const fail = message => { throw new Error(`Invalid 22-brain snapshot: ${message}`); };
+      const array = (value, length, label) => {
+        if (!Array.isArray(value) || value.length !== length) fail(label);
+      };
+      const finiteTree = (value, depth = 0) => {
+        if (depth > 20) fail("nested state");
+        if (typeof value === "number" && !Number.isFinite(value)) fail("non-finite value");
+        if (value && typeof value === "object") {
+          for (const key of Object.keys(value)) {
+            if (["__proto__", "prototype", "constructor"].includes(key)) fail("unsafe key");
+            finiteTree(value[key], depth + 1);
+          }
+        }
+      };
+      finiteTree(data);
+      const sync = candidate.syncytium;
+      if (data.brainCount !== sync.brainCount) fail("brain count");
+      array(data.roles, sync.brainCount, "roles");
+      if (data.roles.some((role, i) => role !== sync.roles[i])) fail("role ordering");
+      array(data.brains, sync.brainCount, "brains");
+      array(data.commissuralWeights, sync.brainCount * sync.brainCount * 4, "coupling matrix");
+      if (!data.config || !Number.isFinite(data.config.couplingStrength)
+        || data.config.couplingStrength < 0 || data.config.couplingStrength > 2) fail("coupling strength");
+      for (let dst = 0; dst < sync.brainCount; dst++) {
+        for (let a = 0; a < 4; a++) {
+          let total = 0;
+          for (let src = 0; src < sync.brainCount; src++) {
+            const weight = data.commissuralWeights[(src * sync.brainCount + dst) * 4 + a];
+            if (typeof weight !== "number" || weight < 0 || weight > 2 || (src === dst && weight !== 0)) fail("invalid edge");
+            total += weight;
+          }
+          if (Math.abs(total - data.config.couplingStrength) > 1e-5) fail("unnormalized coupling");
+        }
+      }
+      for (const key of ["tickCount", "syncytiumSteps", "circadianClock", "neurogenesisBirthCounter"]) {
+        if (!Number.isSafeInteger(data[key]) || data[key] < 0) fail(key);
+      }
+      for (const key of ["prngState", "neurogenesisPrngState"]) {
+        if (!data[key] || !Number.isSafeInteger(data[key].state)
+          || !Number.isSafeInteger(data[key].initialSeed) || !Number.isSafeInteger(data[key].drawCount)) fail(key);
+      }
+      const exact = data.exactState;
+      if (!exact || typeof exact !== "object") fail("exact state missing");
+      array(exact.brainEgos, sync.brainCount, "brain registers");
+      array(exact.alToKcWeights, sync.brainCount, "AL weights");
+      array(exact.targetVectors, sync.brainCount, "executive vectors");
+      array(exact.graftAgents, 3, "agents");
+      if (!Array.isArray(exact.egoValues) || !data.egoStates || typeof data.egoStates !== "object") fail("ego bank");
+      const numericArray = (value, length, label) => {
+        array(value, length, label);
+        if (!value.every(item => typeof item === "number" && Number.isFinite(item))) fail(label);
+      };
+      const ego = (record, brain, bornLength) => {
+        if (!record || !record.scalars || !record.arrays) fail("ego registers missing");
+        const pristine = brain.captureEgo();
+        for (const [key, value] of Object.entries(pristine.scalars)) {
+          if (typeof record.scalars[key] !== typeof value) fail(`ego ${key}`);
+        }
+        for (const [key, value] of Object.entries(pristine.arrays)) numericArray(record.arrays[key], value.length, `ego ${key}`);
+        if (!Array.isArray(record.born) || record.born.length > bornLength) fail("born activations");
+      };
+      for (let i = 0; i < sync.brainCount; i++) {
+        const b = data.brains[i], template = sync.brains[i];
+        if (!b || b.id !== i || b.role !== sync.roles[i]) fail("brain identity");
+        for (const key of ["alProjection", "kcActivations", "mbonActivations", "compassRing", "kcToMbonWeights", "eligibilityTraces", "opticMotionFlow", "epgRing"]) {
+          numericArray(b[key], template[key].length, key);
+        }
+        numericArray(exact.alToKcWeights[i], template.alToKcWeights.length, "trained AL weights");
+        if (!Array.isArray(b.bornNeurons) || b.bornNeurons.length > 256) fail("born neuron pool");
+        for (const neuron of b.bornNeurons) {
+          numericArray(neuron.weights, template.GLOMERULI_COUNT, "born sensory weights");
+          numericArray(neuron.mbonWeights, 4, "born motor weights");
+        }
+        ego(exact.brainEgos[i], template, b.bornNeurons.length);
+      }
+      for (const record of Object.values(data.egoStates)) {
+        array(record, sync.brainCount, "ego brain count");
+        for (let i = 0; i < record.length; i++) ego(record[i], sync.brains[i], data.brains[i].bornNeurons.length);
+      }
+      if (exact.lastDescendingGains !== null) numericArray(exact.lastDescendingGains, sync.brainCount, "descending gains");
+      for (const key of ["lastEstimatedValue", "pdfArousal", "circadianPeriod", "tdGamma", "skyReference", "neurogenesisMax"]) {
+        if (!Number.isFinite(exact[key])) fail(key);
+      }
+      if (exact.circadianPeriod <= 0 || exact.neurogenesisMax < 0 || exact.neurogenesisMax > 256
+        || typeof exact.tickOpen !== "boolean" || typeof exact.tickAuto !== "boolean") fail("schedule");
+      for (const [i, agent] of exact.graftAgents.entries()) {
+        if (!agent || agent.id !== i + 1) fail("agent identity");
+        for (const key of ["lastX", "lastY", "lastHeading", "dwellTicks", "committedAction", "commitmentTimer"]) {
+          if (!Number.isFinite(agent[key])) fail(`agent ${key}`);
+        }
+        numericArray(agent.lastFlyProbabilities, 4, "agent probabilities");
+      }
+      const configKeys = ["stasisThreshold", "stasisEnergyDrain", "socialRefractory", "handshakeEnergy", "triSwarmEnergy"];
+      if (!exact.graftConfig || Object.keys(exact.graftConfig).some(key => !configKeys.includes(key))
+        || configKeys.some(key => !Number.isFinite(exact.graftConfig[key]) || exact.graftConfig[key] < 0)) fail("graft settings");
+      if (exact.externalAdvice) {
+        candidate.syncytium.tickCount = data.tickCount;
+        // A packet can expire exactly on a snapshot tick; retaining it for the
+        // next resolver to discard is replay-equivalent to clearing it now.
+        if (exact.externalAdvice.tick + exact.externalAdvice.ttl <= data.tickCount) {
+          const checkTick = exact.externalAdvice.tick;
+          candidate.syncytium.tickCount = checkTick;
+        }
+        if (!candidate.setExternalAdvice(exact.externalAdvice)) fail("external advice");
+      }
+    }
+
+    static _restore(graft, data) {
       if (!data || !data.brains || data.brains.length < 5) {
         throw new Error("Invalid or incompatible fly brain state data");
       }
@@ -2714,6 +3167,8 @@
     DrosophilaBrain,
     NeurogenesisEngine,
     PreTrainingEngine,
+    SPECIALIST_ROLES,
+    TwentyTwoFlyBrainSyncytium,
     SixteenFlyBrainSyncytium,
     ElevenFlyBrainSyncytium,
     EightFlyBrainSyncytium,

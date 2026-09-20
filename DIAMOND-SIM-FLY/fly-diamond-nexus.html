@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Fly-Diamond Nexus — 16 Brains · Dual Agents · Bio-Connectomics</title>
+<title>Fly-Diamond Nexus — 22 Brains · Three Agents · Living Arena</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#060d1a;color:#dde8ff;font:14px/1.5 system-ui,sans-serif;min-height:100vh}
@@ -188,7 +188,7 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#38bdf8,#818cf
     <a href="index.html">← Hub</a>
     <a href="worldlab.html">World Lab</a>
     <a href="diamond-nexus.html">Diamond Nexus</a>
-    <span>16 Fly Brains · Dual Agents · 1024 Synapses · Celestial Sun · Odometry · Latch</span>
+    <span id="networkSummary">22 Fly Brains · Three Agents · 1,936 Action Channels</span>
   </div>
 </header>
 
@@ -202,6 +202,8 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#38bdf8,#818cf
     <div style="display:flex;flex-direction:column;gap:10px">
       <!-- Seed row -->
       <div class="seed-row">
+        <label for="brainMode">Network</label>
+        <select id="brainMode" onchange="resetSim()"><option value="22">22 brains · adaptive specialists</option><option value="16">16 brains · original network</option></select>
         <label>World Seed</label>
         <input type="number" id="seedInput" value="2077" min="1" max="999999">
         <div class="seed-presets">
@@ -217,6 +219,7 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#38bdf8,#818cf
       <div class="controls">
         <button class="btn btn-primary" id="btnStart" onclick="startSim()">▶ Start</button>
         <button class="btn btn-neutral" id="btnPause" onclick="pauseSim()" disabled>⏸ Pause</button>
+        <button class="btn btn-neutral" id="btnStep" onclick="pauseSim();step()">Step</button>
         <button class="btn btn-danger" onclick="resetSim()">↺ Reset</button>
         <div class="sep"></div>
         <label>Speed</label>
@@ -234,6 +237,13 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#38bdf8,#818cf
         <button class="btn-tool" id="toolFood" onclick="setGodTool('food')">+💎 Food</button>
         <button class="btn-tool" id="toolHazard" onclick="setGodTool('hazard')">+⚡ Hazard</button>
         <button class="btn-tool" id="toolSpray" onclick="setGodTool('spray')">+🧪 Spray Scent</button>
+        <button class="btn-tool" id="toolWall" onclick="setGodTool('wall')">▦ Wall</button>
+        <button class="btn-tool" id="toolWater" onclick="setGodTool('water')">≈ Water</button>
+        <button class="btn-tool" id="toolRefuge" onclick="setGodTool('refuge')">⌂ Refuge</button>
+        <button class="btn-tool" id="toolPredator" onclick="setGodTool('predator')">◆ Predator</button>
+        <button class="btn-tool" id="toolErase" onclick="setGodTool('erase')">Erase</button>
+        <label for="brushRadius">Radius</label><input id="brushRadius" type="range" min="0" max="4" value="0" oninput="document.getElementById('brushRadiusValue').textContent=this.value"><span id="brushRadiusValue">0</span>
+        <label for="brushStrength">Strength</label><input id="brushStrength" type="range" min="0.25" max="3" step="0.25" value="1" oninput="document.getElementById('brushStrengthValue').textContent=this.value"><span id="brushStrengthValue">1</span>
         <button class="btn-tool" onclick="clearChemicalField()">🧹 Clear Odors</button>
         <div class="sep"></div>
         <button class="btn btn-toggle active" id="btnPheromones" onclick="togglePheromones()">🌿 Pheromones: ON</button>
@@ -253,7 +263,7 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#38bdf8,#818cf
         <input type="file" id="importFile" accept=".json" style="display:none" onchange="importStateFile(event)">
         <button class="btn btn-neutral" onclick="document.getElementById('importFile').click()">⬆ Import</button>
         <div class="sep"></div>
-        <button class="btn btn-neutral" id="btnMatrix" onclick="openMatrixModal()">🖩 Synaptic Matrix (16×16)</button>
+        <button class="btn btn-neutral" id="btnMatrix" onclick="openMatrixModal()">🖩 Synaptic Matrix (22×22)</button>
         <button class="btn btn-primary" id="btnBenchmark" onclick="openBenchmarkModal()">🏆 Run Benchmark</button>
       </div>
     </div>
@@ -268,8 +278,15 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#38bdf8,#818cf
       <div id="cellInfo">Click anywhere to inspect or apply selected tool.</div>
     </div>
     <div class="panel" style="padding:10px">
-      <div class="panel-title"><div class="dot" style="background:#818cf8"></div>16-Brain Connectome (Click a node to inspect)</div>
+      <div class="panel-title"><div class="dot" style="background:#818cf8"></div><span id="connectomeTitle">22-Brain Connectome · click a node</span></div>
+      <div class="controls" style="margin-bottom:8px">
+        <label for="graphDensity">Edges</label><input id="graphDensity" type="range" min="10" max="100" step="10" value="80" oninput="drawConnectome()">
+        <label for="graphThreshold">Min weight</label><input id="graphThreshold" type="number" min="0" max="1" step="0.01" value="0" oninput="drawConnectome()">
+        <label for="graphFocus"><input id="graphFocus" type="checkbox" onchange="drawConnectome()"> Focus selected</label>
+        <label for="couplingStrength">Coupling</label><input id="couplingStrength" type="range" min="0" max="2" step="0.1" value="0.8" oninput="setNetworkCoupling(this.value)"><span id="couplingValue">0.8</span>
+      </div>
       <canvas id="connectomeCanvas" width="840" height="480"></canvas>
+      <div id="graphStats" style="font-size:10px;color:#7a9abb;margin-top:6px"></div>
     </div>
   </div>
 
@@ -351,6 +368,17 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#38bdf8,#818cf
 
 <!-- ═══════════════════════════ RIGHT COLUMN ════════════════════════════ -->
 <div class="right-col">
+  <div class="panel">
+    <div class="panel-title"><div class="dot" style="background:#22d3ee"></div>Living Environment</div>
+    <div class="controls" style="margin-bottom:8px">
+      <label for="weatherPreset">Weather</label><select id="weatherPreset" onchange="setWeatherPreset(this.value)"><option value="temperate">Temperate</option><option value="calm">Calm</option><option value="rain">Rain</option><option value="drought">Drought</option><option value="storm">Storm</option><option value="custom" disabled>Custom</option></select>
+      <label for="dynamicWeather"><input id="dynamicWeather" type="checkbox" checked onchange="climate.dynamic=this.checked"> Evolve weather</label>
+    </div>
+    <div id="environmentControls"></div>
+    <div id="environmentStats" style="font-size:11px;color:#a9cbe8;margin-top:8px"></div>
+    <div style="font-size:10px;color:#5a7aa8;margin-top:6px">Wind changes flight cost and scent sensing. Water cools; refuge reduces effort and blocks predator attacks. Synthetic ecology and heuristic circuits.</div>
+  </div>
+  <div class="panel"><div class="panel-title"><div class="dot" style="background:#a78bfa"></div>Supermix graft</div><div id="supermixPanel"></div></div>
 
   <!-- Interactive Neuropil Brain Inspector -->
   <div class="panel" id="inspectorPanel">
@@ -396,7 +424,7 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#38bdf8,#818cf
 
   <!-- Brain activity meters (16 Brains) -->
   <div class="panel">
-    <div class="panel-title"><div class="dot" style="background:#38bdf8"></div>16-Brain Activity Meters</div>
+    <div class="panel-title"><div class="dot" style="background:#38bdf8"></div><span id="brainMetersTitle">22-Brain Activity Meters</span></div>
     <div class="brain-meters" id="brainMeters"></div>
   </div>
 
@@ -451,7 +479,7 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#38bdf8,#818cf
       <span class="tl">Total Steps</span><span class="tv" id="tmSteps">0</span>
       <span class="tl">Seed</span><span class="tv" id="tmSeed">—</span>
       <span class="tl">Pretrained</span><span class="tv" id="tmPretrained">No</span>
-      <span class="tl">Commissural Synapses</span><span class="tv">1024 (16×16×4)</span>
+      <span class="tl">Action Channels</span><span class="tv" id="tmSynapses">1936 (22×22×4)</span>
       <span class="tl">A1 Diamonds</span><span class="tv" id="tmA1D">0</span>
       <span class="tl">A2 Diamonds</span><span class="tv" id="tmA2D">0</span>
       <span class="tl">A3 Diamonds</span><span class="tv" id="tmA3D">0</span>
@@ -466,7 +494,7 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#38bdf8,#818cf
   <div class="modal-card">
     <div class="modal-header">
       <div class="modal-title">
-        <span style="color:#38bdf8">🖩</span> 16×16 Commissural Connectome Synaptic Matrix (1,024 Synapses)
+        <span style="color:#38bdf8">🖩</span> <span id="matrixTitle">22×22 Commissural Matrix (1,936 Action Channels)</span>
       </div>
       <button class="modal-close" onclick="closeMatrixModal()">✕</button>
     </div>
@@ -557,12 +585,13 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#38bdf8,#818cf
 </main>
 
 <script src="src/fly-brain-engine.js"></script>
+<script src="src/fly-environment.js"></script>
 <script src="src/connectome-benchmark.js"></script>
 <script>
 "use strict";
 
 const {
-  SixteenFlyBrainSyncytium, ElevenFlyBrainSyncytium, MultiAgentGraphGraft,
+  TwentyTwoFlyBrainSyncytium, SixteenFlyBrainSyncytium, ElevenFlyBrainSyncytium, MultiAgentGraphGraft,
   FlyBrainStateSerializer, PreTrainingEngine, MulberryPRNG, ChemicalFieldGrid
 } = FlyBrainEngine;
 
@@ -587,13 +616,15 @@ const HAZARD_SENSE   = 4;
 const BRAIN_COLORS = [
   "#38bdf8", "#34d399", "#f87171", "#c084fc", "#fbbf24",
   "#818cf8", "#f59e0b", "#10b981", "#fb7185", "#14b8a6", "#a855f7",
-  "#e879f9", "#f472b6", "#60a5fa", "#facc15", "#4ade80"
+  "#e879f9", "#f472b6", "#60a5fa", "#facc15", "#4ade80",
+  "#2dd4bf", "#fb923c", "#ef4444", "#a3e635", "#e879f9", "#67e8f9"
 ];
 
 const BRAIN_NAMES = [
   "Forager AL", "Navigator CX", "Sentinel MB", "Memory Vault", "Pioneer FB",
   "Optic Lobe", "Executive FSB", "Metabolic SEZ", "LAL Flip-Flop", "VNC CPG", "AMMC",
-  "Protocerebral (PB)", "Ellipsoid (EB)", "Noduli (NO)", "Anterior Optic (AOTU)", "Superior Medial (SMP)"
+  "Protocerebral (PB)", "Ellipsoid (EB)", "Noduli (NO)", "Anterior Optic (AOTU)", "Superior Medial (SMP)",
+  "Plume Tracker", "Climate Homeostat", "Threat Forecast", "Route Memory", "Uncertainty Monitor", "Social Coordinator"
 ];
 
 const BRAIN_DESCRIPTIONS = [
@@ -612,16 +643,22 @@ const BRAIN_DESCRIPTIONS = [
   "Ellipsoid Body (EB) toroidal ring attractor landmark anchoring & drift stabilization.",
   "Noduli (NO) step-length translational odometry & home-vector path integration.",
   "Anterior Optic Tubercle (AOTU) celestial sun compass & polarized skylight e-vector.",
-  "Superior Medial Protocerebrum (SMP) executive commitment latch & action arbitration."
+  "Superior Medial Protocerebrum (SMP) executive commitment latch & action arbitration.",
+  "Heuristic specialist: combine odor bearing and wind direction for plume tracking.",
+  "Heuristic specialist: manage temperature and humidity stress, water seeking and shelter.",
+  "Heuristic specialist: anticipate nearby predators and recruit escape or refuge actions.",
+  "Heuristic specialist: remember recent visited cells and reduce repeated routes.",
+  "Heuristic specialist: increase exploration when sensory evidence is weak or conflicting.",
+  "Heuristic specialist: coordinate proximity to peers without abandoning nearby resources."
 ];
 
 const BRAIN_ACRONYMS = [
   "AL", "CX", "MB", "VAU", "PIO", "OPT", "FSB", "SEZ",
-  "LAL", "VNC", "AMC", "PB", "EB", "NO", "ATU", "SMP"
+  "LAL", "VNC", "AMC", "PB", "EB", "NO", "ATU", "SMP", "PLM", "CLM", "THR", "RTE", "UNC", "SOC"
 ];
 
 // ─────────────── State ───────────────
-let syncytium, graft, chemGrid;
+let syncytium, graft, chemGrid, climate;
 let env = {};
 let simTimer = null;
 let simRunning = false;
@@ -647,10 +684,17 @@ function toggleTrails() {
   drawWorld();
 }
 
-function makeSyncytium(seed) {
-  syncytium = new SixteenFlyBrainSyncytium(seed);
+function brainCount() { return syncytium?.brains.length || 22; }
+
+function makeSyncytium(seed, count = Number(document.getElementById('brainMode').value)) {
+  const Network = count === 16 ? SixteenFlyBrainSyncytium : TwentyTwoFlyBrainSyncytium;
+  syncytium = new Network(seed, { couplingStrength: Number(document.getElementById('couplingStrength').value) });
   graft = new MultiAgentGraphGraft(syncytium, 0.55);
   chemGrid = new ChemicalFieldGrid(GRID, GRID);
+  climate = new FlyEnvironment(seed, GRID);
+  document.getElementById('brainMode').value = String(count);
+  selectedBrainId = Math.min(selectedBrainId, count - 1);
+  lastResult = null;
 }
 
 function generateWorld(seed) {
@@ -688,6 +732,7 @@ function initSim() {
   const seed = parseInt(document.getElementById('seedInput').value,10) || 2077;
   makeSyncytium(seed);
   env = generateWorld(seed);
+  climate.seedTerrain(env);
   a1Diamonds = 0; a2Diamonds = 0; a3Diamonds = 0;
   simStep = 0;
   a1Trail = [{x: env.agent1X, y: env.agent1Y}];
@@ -698,7 +743,8 @@ function initSim() {
   if(graft.triSwarmResonanceEvents !== undefined) graft.triSwarmResonanceEvents = 0;
   if(graft.giantFiberEvents !== undefined) graft.giantFiberEvents = 0;
   graft.beaconWaypoints = [];
-  logEvent(`🌍 World seeded: ${seed} (16 fly brains, 3 agents)`, 'ev-milestone');
+  logEvent(`🌍 World seeded: ${seed} (${brainCount()} fly brains, 3 agents)`, 'ev-milestone');
+  syncEnvironmentControls();
   drawWorld(); drawConnectome(); updateHUD(); updateSidebar(null);
   buildBrainMeters();
   updateInspector();
@@ -744,12 +790,15 @@ function buildSensoryObs(agentX, agentY, agentEnergy, otherX, otherY, heading = 
     const dist = Math.hypot(d.x-agentX, d.y-agentY);
     if(dist < nearestDiamond){ nearestDiamond=dist; diamondAngle=Math.atan2(d.y-agentY,d.x-agentX); }
   }
-  for(const h of env.hazards) {
+  for(const h of [...env.hazards, ...climate.predators]) {
     const dist = Math.hypot(h.x-agentX, h.y-agentY);
     if(dist < nearestHazard){ nearestHazard=dist; hazardAngle=Math.atan2(h.y-agentY,h.x-agentX); }
   }
 
-  const diamondReward = nearestDiamond < DIAMOND_SENSE ? (DIAMOND_SENSE-nearestDiamond)/DIAMOND_SENSE : 0;
+  const weather = climate.sense(agentX, agentY, env);
+  const scentGain = Math.max(0.45, Math.min(1.3, 0.8 + weather.humidity * 0.4 - weather.precipitation * 0.2 +
+    (Math.cos(diamondAngle) * weather.windX + Math.sin(diamondAngle) * weather.windY) * -0.12));
+  const diamondReward = nearestDiamond < DIAMOND_SENSE ? Math.min(1, (DIAMOND_SENSE-nearestDiamond)/DIAMOND_SENSE * scentGain) : 0;
   const hazardThreat  = nearestHazard  < HAZARD_SENSE  ? (HAZARD_SENSE-nearestHazard)/HAZARD_SENSE   : 0;
   const opticFlowX = (otherX - agentX) / GRID;
   const opticFlowY = (otherY - agentY) / GRID;
@@ -759,7 +808,7 @@ function buildSensoryObs(agentX, agentY, agentEnergy, otherX, otherY, heading = 
   const leftAntenna = Math.min(1.0, biFood.left + biCustom.left);
   const rightAntenna = Math.min(1.0, biFood.right + biCustom.right);
 
-  return [
+  const observation = [
     dnX, dnY,
     diamondReward,
     hazardThreat,
@@ -767,17 +816,20 @@ function buildSensoryObs(agentX, agentY, agentEnergy, otherX, otherY, heading = 
     Math.min(nearestDiamond / GRID, 1),
     Math.sin(diamondAngle), Math.cos(diamondAngle),
     Math.sin(hazardAngle),  Math.cos(hazardAngle),
-    opticFlowX, opticFlowY,
-    leftAntenna, rightAntenna
+    opticFlowX * weather.visibility, opticFlowY * weather.visibility,
+    Math.min(1, leftAntenna * scentGain), Math.min(1, rightAntenna * scentGain)
   ];
+  observation.environment = weather;
+  return observation;
 }
 
 function applyAction(agentKey, actionIndex) {
   const dx = [0,0,-1,1][actionIndex];
   const dy = [-1,1,0,0][actionIndex];
   const xKey = agentKey+'X', yKey = agentKey+'Y';
-  env[xKey] = Math.max(0, Math.min(GRID-1, env[xKey]+dx));
-  env[yKey] = Math.max(0, Math.min(GRID-1, env[yKey]+dy));
+  const nx = env[xKey] + dx, ny = env[yKey] + dy;
+  if(!climate.isBlocked(nx, ny)) { env[xKey] = nx; env[yKey] = ny; }
+  env[agentKey+'MovementCost'] = climate.movementCost(env[xKey], env[yKey], dx, dy);
 }
 
 function checkInteractions(agentKey, agentLabel, addDiamond) {
@@ -785,22 +837,30 @@ function checkInteractions(agentKey, agentLabel, addDiamond) {
   // actually drove this fly's action rather than whichever fly stepped last.
   const ax = env[agentKey+'X'], ay = env[agentKey+'Y'];
   const eKey = agentKey+'Energy';
-  env[eKey] = Math.max(0, env[eKey] - ENERGY_STEP);
+  env[eKey] = Math.max(0, env[eKey] - (env[agentKey+'MovementCost'] ?? ENERGY_STEP));
+  const predatorDamage = climate.predatorDamage(ax, ay);
+  if(predatorDamage > 0) {
+    env[eKey] = Math.max(0, env[eKey] - predatorDamage);
+    env.hazardsHit++;
+    graft.feedback(-3, true, {x:ax/GRID, y:ay/GRID}, agentKey);
+    logEvent(`◆ ${agentLabel} predator contact (-${predatorDamage.toFixed(1)})`, 'ev-hazard');
+  }
 
   for(let i=env.diamonds.length-1; i>=0; i--) {
     if(env.diamonds[i].x===ax && env.diamonds[i].y===ay) {
+      const gain = ENERGY_DIAMOND * (env.diamonds[i].strength || 1);
       env.diamonds.splice(i,1);
-      env[eKey] = Math.min(ENERGY_MAX, env[eKey]+ENERGY_DIAMOND);
+      env[eKey] = Math.min(ENERGY_MAX, env[eKey]+gain);
       env.diamondsCollected++;
       addDiamond();
-      logEvent(`💎 ${agentLabel} collected diamond (+${ENERGY_DIAMOND})`, 'ev-reward');
+      logEvent(`💎 ${agentLabel} collected diamond (+${gain})`, 'ev-reward');
       graft.feedback(5, false, {x:ax/GRID, y:ay/GRID}, agentKey);
       break;
     }
   }
   for(const h of env.hazards) {
     if(h.x===ax && h.y===ay) {
-      env[eKey] = Math.max(0, env[eKey]-ENERGY_HAZARD);
+      env[eKey] = Math.max(0, env[eKey]-ENERGY_HAZARD * (h.strength || 1));
       env.hazardsHit++;
       logEvent(`⚡ ${agentLabel} hit hazard (-${ENERGY_HAZARD})`, 'ev-hazard');
       graft.feedback(-3, true, {x:ax/GRID, y:ay/GRID}, agentKey);
@@ -813,10 +873,11 @@ function checkInteractions(agentKey, agentLabel, addDiamond) {
     const occupied = new Set([
       `${env.agent1X},${env.agent1Y}`,`${env.agent2X},${env.agent2Y}`,
       `${env.agent3X},${env.agent3Y}`,
-      ...env.hazards.map(h=>`${h.x},${h.y}`)
+      ...env.hazards.map(h=>`${h.x},${h.y}`), ...climate.walls.map(h=>`${h.x},${h.y}`)
     ]);
-    while(env.diamonds.length < DIAMOND_COUNT) {
-      const x=rng.int(GRID), y=rng.int(GRID), k=`${x},${y}`;
+    const start = rng.int(GRID * GRID);
+    for(let attempt=0; attempt<GRID*GRID && env.diamonds.length < DIAMOND_COUNT; attempt++) {
+      const index=(start+attempt)%(GRID*GRID), x=index%GRID, y=Math.floor(index/GRID), k=`${x},${y}`;
       if(!occupied.has(k)){ env.diamonds.push({x,y}); occupied.add(k); }
     }
     logEvent(`🌟 Diamond field respawned (step ${simStep})`, 'ev-milestone');
@@ -825,6 +886,7 @@ function checkInteractions(agentKey, agentLabel, addDiamond) {
 
 function step() {
   simStep++;
+  climate.step(env);
 
   // 1. Diffuse odors and pheromones
   for(const d of env.diamonds) chemGrid.emit("foodOdor", d.x, d.y, 0.4);
@@ -832,12 +894,13 @@ function step() {
   chemGrid.emit("foragerTrail", env.agent1X, env.agent1Y, 0.6);
   chemGrid.emit("sentinelTrail", env.agent2X, env.agent2Y, 0.6);
   chemGrid.emit("customPheromone", env.agent3X, env.agent3Y, 0.35);
-  chemGrid.step(0.18, 0.94);
+  chemGrid.step(0.16 + climate.weather.humidity * 0.08, 0.96 - climate.weather.precipitation * 0.06);
 
   // 2. Build sensory observations with bilateral antennae
   const obs1 = buildSensoryObs(env.agent1X, env.agent1Y, env.agent1Energy, env.agent2X, env.agent2Y, graft.agent1.lastHeading);
   const obs2 = buildSensoryObs(env.agent2X, env.agent2Y, env.agent2Energy, env.agent1X, env.agent1Y, graft.agent2.lastHeading);
   const obs3 = buildSensoryObs(env.agent3X, env.agent3Y, env.agent3Energy, env.agent1X, env.agent1Y, graft.agent3.lastHeading);
+  env.environmentByAgent = { agent1: obs1.environment, agent2: obs2.environment, agent3: obs3.environment };
 
   const beaconsBefore = graft.beaconWaypoints.length;
   lastResult = graft.resolveAgents(env, obs1, obs2, obs3);
@@ -1176,110 +1239,74 @@ function drawAgent(ctx, gx, gy, cw, ch, color, isStasis, regime, heading = 0) {
 
 let brainNodePositions = [];
 
+function setNetworkCoupling(value) {
+  const amount = Math.max(0, Math.min(2, Number(value)));
+  syncytium?.setCouplingStrength?.(amount);
+  document.getElementById('couplingValue').textContent = amount.toFixed(1);
+  drawConnectome();
+}
+
 function drawConnectome() {
-  const W=conCanvas.width, H=conCanvas.height;
+  const W=conCanvas.width, H=conCanvas.height, N=brainCount();
+  const cx=W/2, cy=H/2 - 8;
   conCtx.clearRect(0,0,W,H);
-
-  const N=16;
-  const cx=W/2, cy=H/2;
-
-  // 3-tier orbital layout for 16 brains:
-  // Tier 1 (Central Complex Compass Core): 4 brains (radius 80)
-  // Tier 2 (Sensory & Learning Hub): 6 brains (radius 155)
-  // Tier 3 (Executive & Premotor Circuit): 6 brains (radius 225)
-  const tiers = [
-    { ids:[1, 11, 12, 13], radius: 80 },
-    { ids:[0, 2, 3, 4, 5, 14], radius: 155 },
-    { ids:[6, 7, 8, 9, 10, 15], radius: 225 }
-  ];
-
+  const inner=[1,11,12,13], middle=[0,2,3,4,5,14], outer=[];
+  for(let i=0;i<N;i++) if(!inner.includes(i) && !middle.includes(i)) outer.push(i);
   brainNodePositions = new Array(N);
-  for(const tier of tiers) {
-    const n=tier.ids.length;
-    tier.ids.forEach((brainId,i) => {
-      const angle = (i/(n))*(2*Math.PI) - Math.PI/2;
-      brainNodePositions[brainId] = {
-        id: brainId,
-        x: cx + tier.radius*Math.cos(angle),
-        y: cy + tier.radius*Math.sin(angle)
-      };
+  for(const [ids,rx,ry] of [[inner,100,63],[middle,205,125],[outer,330,192]]) {
+    conCtx.beginPath(); conCtx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2);
+    conCtx.strokeStyle='#14273e'; conCtx.lineWidth=1; conCtx.stroke();
+    ids.forEach((id,i)=>{
+      const angle=i/ids.length*Math.PI*2-Math.PI/2;
+      brainNodePositions[id]={id,x:cx+Math.cos(angle)*rx,y:cy+Math.sin(angle)*ry};
     });
   }
-
-  // Draw commissural edges (sample to avoid visual clutter)
-  conCtx.globalAlpha=0.15;
-  for(let src=0;src<N;src++) {
-    for(let dst=src+1;dst<N;dst++) {
-      if(!syncytium) continue;
-      const w = syncytium.commissuralWeights[(src*N+dst)*4];
-      if(w < 0.05) continue;
-      const ps=brainNodePositions[src], pd=brainNodePositions[dst];
-      const lw=Math.min(w*8, 2);
-      conCtx.beginPath(); conCtx.moveTo(ps.x,ps.y); conCtx.lineTo(pd.x,pd.y);
-      conCtx.strokeStyle=BRAIN_COLORS[src]; conCtx.lineWidth=lw; conCtx.stroke();
+  const density=Number(document.getElementById('graphDensity').value)/100;
+  const threshold=Math.max(0,Number(document.getElementById('graphThreshold').value)||0);
+  const focus=document.getElementById('graphFocus').checked;
+  const edges=[];
+  if(syncytium) for(let src=0;src<N;src++) for(let dst=0;dst<N;dst++) {
+    if(src===dst || (focus && src!==selectedBrainId && dst!==selectedBrainId)) continue;
+    let w=0;
+    for(let a=0;a<4;a++) w+=syncytium.commissuralWeights[(src*N+dst)*4+a]/4;
+    if(Math.abs(w)<threshold || Math.abs(w)<0.00001) continue;
+    edges.push({src,dst,w,rank:((src*37+dst*19)%97)/97});
+  }
+  edges.sort((a,b)=>Math.abs(b.w)-Math.abs(a.w) || a.rank-b.rank);
+  const visible=edges.slice(0,Math.ceil(edges.length*density));
+  for(const {src,dst,w} of visible) {
+    const a=brainNodePositions[src], b=brainNodePositions[dst];
+    const selected=src===selectedBrainId || dst===selectedBrainId;
+    const dx=b.x-a.x,dy=b.y-a.y,length=Math.hypot(dx,dy)||1;
+    const bend=9, mx=(a.x+b.x)/2-dy/length*bend,my=(a.y+b.y)/2+dx/length*bend;
+    conCtx.beginPath(); conCtx.moveTo(a.x,a.y); conCtx.quadraticCurveTo(mx,my,b.x,b.y);
+    conCtx.strokeStyle=w<0?'#fb7185':BRAIN_COLORS[src];
+    conCtx.globalAlpha=focus?0.38:selected?0.26:0.085;
+    conCtx.lineWidth=Math.min(2.4,0.55+Math.abs(w)*4); conCtx.stroke();
+    if(focus) {
+      const t=0.78,px=(1-t)*(1-t)*a.x+2*(1-t)*t*mx+t*t*b.x,py=(1-t)*(1-t)*a.y+2*(1-t)*t*my+t*t*b.y;
+      const angle=Math.atan2((1-t)*(my-a.y)+t*(b.y-my),(1-t)*(mx-a.x)+t*(b.x-mx));
+      conCtx.beginPath(); conCtx.moveTo(px,py); conCtx.lineTo(px-6*Math.cos(angle-0.45),py-6*Math.sin(angle-0.45)); conCtx.moveTo(px,py); conCtx.lineTo(px-6*Math.cos(angle+0.45),py-6*Math.sin(angle+0.45)); conCtx.stroke();
     }
   }
   conCtx.globalAlpha=1;
-
-  // Draw nodes
   for(let i=0;i<N;i++) {
-    const p=brainNodePositions[i];
-    const color=BRAIN_COLORS[i];
-    const isSelected = (i === selectedBrainId);
-    let activity=0;
-    if(syncytium && syncytium.brains[i]) {
-      activity=syncytium.brains[i].mbonActivations.reduce((a,b)=>a+Math.abs(b),0)/4;
-    }
-    activity=Math.min(activity,1);
-
-    const glowRadius = isSelected ? 22 : (16+activity*8);
-    const glow=conCtx.createRadialGradient(p.x,p.y,0,p.x,p.y,glowRadius);
-    glow.addColorStop(0,color+(Math.round(activity*180).toString(16).padStart(2,'0')));
-    glow.addColorStop(1,color+'00');
-    conCtx.beginPath(); conCtx.arc(p.x,p.y,glowRadius,0,Math.PI*2);
-    conCtx.fillStyle=glow; conCtx.fill();
-
-    conCtx.beginPath(); conCtx.arc(p.x,p.y,isSelected ? 11 : 8,0,Math.PI*2);
-    conCtx.fillStyle=color; conCtx.fill();
-    conCtx.strokeStyle=isSelected ? '#fff' : '#fff4'; conCtx.lineWidth=isSelected ? 2 : 1; conCtx.stroke();
-
-    conCtx.fillStyle='#dde8ff'; conCtx.font=isSelected ? 'bold 10px system-ui' : 'bold 8px system-ui';
-    conCtx.textAlign='center'; conCtx.textBaseline='middle';
-    const angle=Math.atan2(p.y-cy,p.x-cx);
-    const lx=p.x+20*Math.cos(angle), ly=p.y+20*Math.sin(angle);
-    conCtx.fillText(`B${i}`,lx,ly);
+    const p=brainNodePositions[i],color=BRAIN_COLORS[i],selected=i===selectedBrainId;
+    const activity=Math.min(1,(syncytium?.brains[i]?.mbonActivations||[]).reduce((sum,v)=>sum+Math.abs(v),0)/4);
+    conCtx.beginPath(); conCtx.arc(p.x,p.y,selected?17:13,0,Math.PI*2); conCtx.fillStyle='#071525'; conCtx.fill();
+    conCtx.strokeStyle=color; conCtx.lineWidth=selected?3:1.5; conCtx.stroke();
+    conCtx.beginPath(); conCtx.arc(p.x,p.y,4+activity*6,0,Math.PI*2); conCtx.fillStyle=color; conCtx.globalAlpha=0.35+activity*0.55; conCtx.fill(); conCtx.globalAlpha=1;
+    conCtx.font='bold 9px system-ui'; conCtx.textAlign='center'; conCtx.textBaseline='middle'; conCtx.fillStyle='#eff6ff'; conCtx.fillText(BRAIN_ACRONYMS[i],p.x,p.y);
+    conCtx.font='9px system-ui'; conCtx.fillStyle=color; conCtx.fillText(`B${i}`,p.x,p.y+24);
   }
-
-  // Central agent nodes
-  if(lastResult) {
-    conCtx.beginPath(); conCtx.arc(cx-18,cy+H*0.35,7,0,Math.PI*2);
-    conCtx.fillStyle='#34d399'; conCtx.fill();
-    conCtx.beginPath(); conCtx.arc(cx+18,cy+H*0.35,7,0,Math.PI*2);
-    conCtx.fillStyle='#c084fc'; conCtx.fill();
-
-    const agentBrains1=[0,1,3,6,7,11,13];
-    const agentBrains2=[2,4,5,8,9,10,12,14,15];
-    conCtx.globalAlpha=0.3;
-    for(const b of agentBrains1) {
-      const p=brainNodePositions[b];
-      conCtx.beginPath(); conCtx.moveTo(cx-18,cy+H*0.35); conCtx.lineTo(p.x,p.y);
-      conCtx.strokeStyle='#34d399'; conCtx.lineWidth=1; conCtx.stroke();
-    }
-    for(const b of agentBrains2) {
-      const p=brainNodePositions[b];
-      conCtx.beginPath(); conCtx.moveTo(cx+18,cy+H*0.35); conCtx.lineTo(p.x,p.y);
-      conCtx.strokeStyle='#c084fc'; conCtx.lineWidth=1; conCtx.stroke();
-    }
-    conCtx.beginPath(); conCtx.moveTo(cx-18,cy+H*0.35); conCtx.lineTo(cx+18,cy+H*0.35);
-    conCtx.strokeStyle='#a855f7'; conCtx.lineWidth=2; conCtx.stroke();
-    conCtx.globalAlpha=1;
-  }
+  const network=syncytium?.getTelemetry().graph;
+  document.getElementById('graphStats').textContent=`${visible.length} visible directed edges · ${N} nodes · ${N*N*4} stored action channels · ${network?.directedPairs ?? N*(N-1)} active pairs. Edge controls filter display; coupling changes decisions.`;
 }
 
 function buildBrainMeters() {
   const el=document.getElementById('brainMeters');
   el.innerHTML='';
-  for(let i=0;i<16;i++) {
+  for(let i=0;i<brainCount();i++) {
     el.innerHTML+=`
       <div class="brain-row ${i === selectedBrainId ? 'selected' : ''}" onclick="selectBrain(${i})" id="brow${i}">
         <span class="brain-name" style="color:${BRAIN_COLORS[i]}">B${i} ${BRAIN_NAMES[i].split(' ')[0]}</span>
@@ -1291,7 +1318,7 @@ function buildBrainMeters() {
 
 function updateBrainMeters() {
   if(!syncytium) return;
-  for(let i=0;i<16;i++) {
+  for(let i=0;i<brainCount();i++) {
     const b=syncytium.brains[i];
     if(!b) continue;
     const act=Math.min(b.mbonActivations.reduce((a,v)=>a+Math.abs(v),0)/4,1);
@@ -1306,7 +1333,7 @@ function updateBrainMeters() {
 // ─────────────── Neuropil Inspector ───────────────
 function selectBrain(id) {
   selectedBrainId = id;
-  for(let i=0;i<16;i++) {
+  for(let i=0;i<brainCount();i++) {
     const row = document.getElementById('brow'+i);
     if(row) {
       if(i === id) row.classList.add('selected');
@@ -1633,7 +1660,7 @@ function runPreTraining() {
     status.textContent='Done ✓';
     btn.disabled=false;
     document.getElementById('pretrainedBadge').style.display='';
-    logEvent('⚡ Pre-training complete (80 epochs across 16 brains)', 'ev-milestone');
+    logEvent(`⚡ Pre-training complete (80 epochs across ${brainCount()} brains)`, 'ev-milestone');
     updateSidebar(lastResult);
     updateInspector();
   },50);
@@ -1760,14 +1787,14 @@ function renderMatrixGrid() {
 
   const weights = syncytium.commissuralWeights;
   let html = '<thead><tr><th>Pre\\Post</th>';
-  for (let c = 0; c < 16; c++) {
+  for (let c = 0; c < brainCount(); c++) {
     html += `<th title="${BRAIN_NAMES[c]}">${BRAIN_ACRONYMS[c]}</th>`;
   }
   html += '</tr></thead><tbody>';
 
-  for (let src = 0; src < 16; src++) {
+  for (let src = 0; src < brainCount(); src++) {
     html += `<tr><th title="${BRAIN_NAMES[src]}">${BRAIN_ACRONYMS[src]}</th>`;
-    for (let dst = 0; dst < 16; dst++) {
+    for (let dst = 0; dst < brainCount(); dst++) {
       if (src === dst) {
         html += `<td><div class="matrix-cell self" title="Self-recurrent ${BRAIN_ACRONYMS[src]}">—</div></td>`;
         continue;
@@ -1777,11 +1804,11 @@ function renderMatrixGrid() {
       if (matrixChannel === -1) {
         let sum = 0;
         for (let a = 0; a < 4; a++) {
-          sum += weights[(src * 16 + dst) * 4 + a];
+          sum += weights[(src * brainCount() + dst) * 4 + a];
         }
         val = sum / 4;
       } else {
-        val = weights[(src * 16 + dst) * 4 + matrixChannel];
+        val = weights[(src * brainCount() + dst) * 4 + matrixChannel];
       }
 
       let bg = 'rgba(15, 23, 42, 0.6)';
@@ -1826,11 +1853,11 @@ function tweakSynapse(src, dst, delta) {
   const weights = syncytium.commissuralWeights;
   if (matrixChannel === -1) {
     for (let a = 0; a < 4; a++) {
-      const idx = (src * 16 + dst) * 4 + a;
+      const idx = (src * brainCount() + dst) * 4 + a;
       weights[idx] = Math.max(-0.5, Math.min(1.0, weights[idx] + delta));
     }
   } else {
-    const idx = (src * 16 + dst) * 4 + matrixChannel;
+    const idx = (src * brainCount() + dst) * 4 + matrixChannel;
     weights[idx] = Math.max(-0.5, Math.min(1.0, weights[idx] + delta));
   }
   renderMatrixGrid();
@@ -1843,7 +1870,7 @@ function resetMatrixWeights() {
   syncytium.commissuralWeights = syncytium._initCommissuralWeights();
   renderMatrixGrid();
   drawConnectome();
-  logEvent('↺ Reset 1024 commissural weights to baseline (0.08)', 'ev-milestone');
+  logEvent(`↺ Reset ${brainCount()*brainCount()*4} commissural action channels to their network baseline`, 'ev-milestone');
 }
 
 // ─────────────── Benchmark Modal ───────────────
@@ -2037,7 +2064,7 @@ if(_autoSaved) {
     const _p=JSON.parse(_autoSaved);
     if(_p){
       _restoreFromJson(_autoSaved);
-      logEvent('🔄 Auto-resumed 16-brain state from previous session','ev-milestone');
+      logEvent('🔄 Auto-resumed saved network from previous session','ev-milestone');
     }
   } catch(e){}
 }

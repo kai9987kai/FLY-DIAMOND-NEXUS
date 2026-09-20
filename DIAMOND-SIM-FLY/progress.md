@@ -44,6 +44,15 @@ Research reviewed: Shiu et al., *A Drosophila computational brain model reveals 
 
 ## Remaining scope limits
 
+## 20 September 2026 — 22-module expansion and Supermix graft
+
+User request: add another six fly brains, advance agents and dense graph connections, enrich God Mode and environmental variables, use recent research, and connect Supermix v92 without stopping existing training.
+
+- Read the current clean checkout and prior reproducibility guidance; split implementation into engine, environment/UI and a read-only Supermix sidecar with disjoint file ownership.
+- Design and source mapping: `docs/fly-lab-22-design.md`. The original 16-module engine remains available for matched comparisons. Functional additions are heuristics, not imported biological connectomes.
+- Initial live inspection found v91 evaluation under a v93 launcher and a prepared v92 script, but no verified v92 trainer or serving endpoint. No Supermix file/process mutations are authorized by this implementation; the sidecar must report telemetry separately from inference.
+- Added browser-side bounded asynchronous advice client and a 22-module benchmark arm. Full validation follows integration.
+
 - Completed the earlier improvement set without committing or pushing. Existing branch remains main.
 - Fly Lab limits: one reduced 16x16 arena and one convenience seed set, not a held-out benchmark. A single Antennal Lobe brain outscores all sixteen there by a wide margin; gating is the largest single contributor to the syncytium's score and still leaves it far behind. Closing that gap is the clearest piece of work left. The spiking circuit has no plasticity and is not used by the interactive app. No connectome data is read at runtime; the 16x16x4 commissures are synthetic.
 - No universal superiority or speedup claim: the full-version benchmark covers one fixed configuration, and its timing uses different execution contexts. Preliminary within-core beam-vs-shooting comparison is inconclusive.

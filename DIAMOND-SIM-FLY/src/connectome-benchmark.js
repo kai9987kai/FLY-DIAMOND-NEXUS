@@ -35,6 +35,7 @@
     ChemicalFieldGrid,
     DrosophilaBrain,
     SixteenFlyBrainSyncytium,
+    TwentyTwoFlyBrainSyncytium,
     PreTrainingEngine,
     angleDelta
   } = FlyBrainEngine;
@@ -441,9 +442,9 @@
      * @param {object|string|null} [config] - "legacy" selects the pre-upgrade
      *   circuit models, which is how the legacy arm is built.
      */
-    constructor(seed = 42, config = null) {
-      this.name = config === "legacy" ? "Syncytium_16B_Legacy" : "Syncytium_16B";
-      this.syncytium = new SixteenFlyBrainSyncytium(seed, config);
+    constructor(seed = 42, config = null, expanded = false) {
+      this.name = expanded ? "Syncytium_22B" : config === "legacy" ? "Syncytium_16B_Legacy" : "Syncytium_16B";
+      this.syncytium = expanded ? new TwentyTwoFlyBrainSyncytium(seed, config) : new SixteenFlyBrainSyncytium(seed, config);
       PreTrainingEngine.runPreTraining(this.syncytium, 15);
       this.heading = 0;
       this.latchAction = -1;
@@ -456,7 +457,8 @@
     act(sensoryObs, stepDx = 0, stepDy = 0, energy = 100, stepIndex = 0, currentX = 0, currentY = 0, gridSize = 16) {
       const sunAngle = ((stepIndex % 120) / 120) * Math.PI * 2;
       const probs = this.syncytium.step(sensoryObs, turnRate(this, stepDx, stepDy), 0, energy, {
-        dx: 0, dy: 0, dist: 99, sunAngle, skyReference: this.skyReference, stepDx, stepDy
+        dx: 0, dy: 0, dist: 99, sunAngle, skyReference: this.skyReference, stepDx, stepDy,
+        x: currentX, y: currentY, gridSize
       });
 
       const dxs = [0, 0, -1, 1], dys = [-1, 1, 0, 0];
@@ -566,7 +568,8 @@
         "SingleBrain_AL",
         "CentralComplex_8B",
         "Syncytium_16B_Legacy",
-        "Syncytium_16B"
+        "Syncytium_16B",
+        "Syncytium_22B"
       ];
       // Available but off the default list: an episode costs roughly an order
       // of magnitude more than a rate-coded arm.
@@ -587,6 +590,8 @@
           return new CentralComplex8Policy(seed);
         case "Syncytium_16B":
           return new SixteenBrainSyncytiumPolicy(seed);
+        case "Syncytium_22B":
+          return new SixteenBrainSyncytiumPolicy(seed, null, true);
         case "Syncytium_16B_Legacy":
           return new SixteenBrainSyncytiumPolicy(seed, "legacy");
         case "Spiking_MB":
@@ -608,6 +613,10 @@
         const action = policy.act(
           obs, lastDx, lastDy, arena.agentEnergy, t, arena.agentX, arena.agentY, arena.gridSize
         );
+
+        // Boundary filtering and commitment latches can replace the neural
+        // argmax. Credit the action actually sent to the arena in every arm.
+        if (policy.syncytium) policy.syncytium.setExecutedAction(action);
 
         const res = arena.step(action);
         lastDx = res.stepDx;
