@@ -20,7 +20,7 @@
 
   async function request(route, body) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4500);
+    const timer = setTimeout(() => controller.abort(), body ? 15000 : 4500);
     try {
       const response = await fetch(route, {
         method: body ? 'POST' : 'GET', cache: 'no-store', signal: controller.signal,
@@ -57,13 +57,13 @@
       mode.textContent = ready ? 'Connected · verified ' + status.inference.verifiedModel :
         status.mode === 'telemetry-only' ? 'Connected · telemetry only' : 'Model unavailable';
       const t = status.training || {}, metrics = t.metrics || {};
-      training.textContent = ['v92: ' + (t.state || 'unverified'), t.message,
+      training.textContent = [(status.targetModel || 'Supermix') + ': ' + (t.state || 'unverified'), t.message,
         Number.isFinite(metrics.step) ? 'Step ' + metrics.step + (Number.isFinite(metrics.totalSteps) ? '/' + metrics.totalSteps : '') : '',
         Number.isFinite(metrics.loss) ? 'Loss ' + metrics.loss.toFixed(4) : '',
         !ready ? status.inference?.reason : ''].filter(Boolean).join(' · ');
       if (!ready) adviceText.textContent = 'No model advice applied. Training files and running jobs remain untouched.';
       const now = performance.now();
-      if (ready && enabled.checked && root.flyLab.running && now - lastAdvice >= 10000) {
+      if (ready && enabled.checked && root.flyLab.running && now - lastAdvice >= Math.max(10000, status.safety?.minAdviceIntervalMs || 10000)) {
         lastAdvice = now;
         const graft = root.flyLab.graft, seed = root.flyLab.env.seed;
         const input = observation();
@@ -76,7 +76,7 @@
           return;
         }
         // Keep the request tick: network delay must never refresh old advice.
-        const proposal = {...response.advice, tick: input.tick};
+        const proposal = {...response.advice, tick: input.tick, source: response.source, model: response.model};
         if (graft.setExternalAdvice(proposal)) {
           applied++; lastReceipt = {model: response.model, tick: input.tick, expires: input.tick + proposal.ttl};
           adviceText.textContent = 'Received ' + response.model + ' advice at tick ' + input.tick + '; expires at ' + lastReceipt.expires + '.';

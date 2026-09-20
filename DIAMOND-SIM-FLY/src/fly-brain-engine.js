@@ -1,7 +1,9 @@
 /**
  * @file fly-brain-engine.js
- * Biologically-inspired computational simulation of 11 interconnected Drosophila
- * (fruit fly) brain connectomes with offline Pre-Training, dynamic neurogenesis,
+ * Synthetic 16-circuit baseline and 22-circuit engineering extension inspired
+ * by selected Drosophila (fruit fly) functions. These are heuristic controllers,
+ * not reconstructed connectomes or validated biological brain simulations.
+ * Supports offline conditioning, algorithmic unit growth,
  * 3-factor LTM plasticity, tri-neuromodulation (Dopamine, Octopamine, Serotonin),
  * Central Complex vector navigation, Optic Lobe motion flow, Subesophageal Zone (SEZ)
  * metabolic homeostasis, Lateral Accessory Lobe (LAL) flip-flop casting, VNC CPG gait
@@ -180,7 +182,9 @@
 
     next() {
       this.drawCount++;
-      let t = (this.state += 0x6d2b79f5);
+      // Mulberry32 is a uint32 stream. Keeping the accumulator canonical also
+      // prevents precision loss in long runs and makes resumed JSON identical.
+      let t = (this.state = (this.state + 0x6d2b79f5) >>> 0);
       t = Math.imul(t ^ (t >>> 15), t | 1);
       t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
@@ -197,7 +201,7 @@
      * required for an exact resume.
      */
     getState() {
-      return { initialSeed: this.initialSeed, state: this.state, drawCount: this.drawCount };
+      return { initialSeed: this.initialSeed, state: this.state >>> 0, drawCount: this.drawCount };
     }
 
     setState(snapshot) {
@@ -2799,6 +2803,7 @@
           tdGamma: sync.tdGamma,
           tickOpen: sync._tickOpen, tickAuto: sync._tickAuto,
           neurogenesisMax: sync.neurogenesis.maxBornPerBrain,
+          neurogenesisNoveltyThreshold: sync.neurogenesis.noveltyThreshold,
           graftAgents: [graft.agent1, graft.agent2, graft.agent3],
           skyReference: graft.skyReference,
           graftConfig: Object.fromEntries([
@@ -2814,12 +2819,15 @@
     }
 
     static deserialize(graft, stateData) {
-      const data = typeof stateData === "string" ? JSON.parse(stateData) : stateData;
+      let data = typeof stateData === "string" ? JSON.parse(stateData) : stateData;
       const isExtended = graft.syncytium instanceof TwentyTwoFlyBrainSyncytium;
       if (data && data.version === "8.0.0") {
         if (!isExtended) throw new Error("22-brain state requires a 22-brain syncytium");
         const candidate = new MultiAgentGraphGraft(new TwentyTwoFlyBrainSyncytium(data.worldSeed, data.config));
         this._validateExtended(data, candidate);
+        // Imported object ownership ends here: later caller mutation must not
+        // rewrite restored beacons, engrams, body records or advisory packets.
+        data = JSON.parse(JSON.stringify(data));
         this._restore(candidate, data);
         const exact = data.exactState;
         const sync = candidate.syncytium;
@@ -2838,6 +2846,7 @@
         sync._tickOpen = exact.tickOpen;
         sync._tickAuto = exact.tickAuto;
         sync.neurogenesis.maxBornPerBrain = exact.neurogenesisMax;
+        sync.neurogenesis.noveltyThreshold = exact.neurogenesisNoveltyThreshold;
         [candidate.agent1, candidate.agent2, candidate.agent3] = exact.graftAgents.map(agent => Object.assign({}, agent));
         candidate.skyReference = exact.skyReference;
         Object.assign(candidate, exact.graftConfig);
@@ -2878,6 +2887,23 @@
       array(data.commissuralWeights, sync.brainCount * sync.brainCount * 4, "coupling matrix");
       if (!data.config || !Number.isFinite(data.config.couplingStrength)
         || data.config.couplingStrength < 0 || data.config.couplingStrength > 2) fail("coupling strength");
+      for (const [key, value] of Object.entries(DEFAULT_CONFIG)) {
+        if (typeof value === "number" && (!Number.isFinite(data.config[key]) || data.config[key] < 0)) fail(`config ${key}`);
+      }
+      for (const [key, choices] of Object.entries({
+        compass: ["attractor", "kinematic"], mbInhibition: ["apl", "topk"],
+        plasticity: ["dan-ltd", "hebbian"], consensus: ["gated", "flat"]
+      })) {
+        if (!choices.includes(data.config[key])) fail(`config ${key}`);
+      }
+      if (data.config.ringSigma <= 0) fail("ring width");
+      for (const key of ["graftInfluence", "sunAngle", "lastRPE", "stasisEvents", "handshakeEvents",
+        "handshakeCooldown", "triSwarmCooldown", "triSwarmResonanceEvents", "giantFiberEvents",
+        "pretrainingEpochs", "mitosisEvents", "apoptosisEvents"]) {
+        if (!Number.isFinite(data[key])) fail(key);
+      }
+      if (data.graftInfluence < 0 || data.graftInfluence > 1 || typeof data.isPretrained !== "boolean") fail("graft configuration");
+      if (!Array.isArray(data.beaconWaypoints) || !Array.isArray(data.engramBank)) fail("waypoints and engrams");
       for (let dst = 0; dst < sync.brainCount; dst++) {
         for (let a = 0; a < 4; a++) {
           let total = 0;
@@ -2905,7 +2931,7 @@
       if (!Array.isArray(exact.egoValues) || !data.egoStates || typeof data.egoStates !== "object") fail("ego bank");
       const numericArray = (value, length, label) => {
         array(value, length, label);
-        if (!value.every(item => typeof item === "number" && Number.isFinite(item))) fail(label);
+        if (!value.every(item => typeof item === "number" && Number.isFinite(item) && Math.abs(item) <= 3.4028234e38)) fail(label);
       };
       const ego = (record, brain, bornLength) => {
         if (!record || !record.scalars || !record.arrays) fail("ego registers missing");
@@ -2915,6 +2941,7 @@
         }
         for (const [key, value] of Object.entries(pristine.arrays)) numericArray(record.arrays[key], value.length, `ego ${key}`);
         if (!Array.isArray(record.born) || record.born.length > bornLength) fail("born activations");
+        numericArray(record.born, record.born.length, "born activations");
       };
       for (let i = 0; i < sync.brainCount; i++) {
         const b = data.brains[i], template = sync.brains[i];
@@ -2925,6 +2952,8 @@
         numericArray(exact.alToKcWeights[i], template.alToKcWeights.length, "trained AL weights");
         if (!Array.isArray(b.bornNeurons) || b.bornNeurons.length > 256) fail("born neuron pool");
         for (const neuron of b.bornNeurons) {
+          if (!neuron || typeof neuron.id !== "string"
+            || ["age", "maturity", "activation"].some(key => !Number.isFinite(neuron[key]))) fail("born neuron identity");
           numericArray(neuron.weights, template.GLOMERULI_COUNT, "born sensory weights");
           numericArray(neuron.mbonWeights, 4, "born motor weights");
         }
@@ -2935,11 +2964,15 @@
         for (let i = 0; i < record.length; i++) ego(record[i], sync.brains[i], data.brains[i].bornNeurons.length);
       }
       if (exact.lastDescendingGains !== null) numericArray(exact.lastDescendingGains, sync.brainCount, "descending gains");
-      for (const key of ["lastEstimatedValue", "pdfArousal", "circadianPeriod", "tdGamma", "skyReference", "neurogenesisMax"]) {
+      for (const key of ["lastEstimatedValue", "pdfArousal", "circadianPeriod", "tdGamma", "skyReference", "neurogenesisMax", "neurogenesisNoveltyThreshold"]) {
         if (!Number.isFinite(exact[key])) fail(key);
       }
       if (exact.circadianPeriod <= 0 || exact.neurogenesisMax < 0 || exact.neurogenesisMax > 256
         || typeof exact.tickOpen !== "boolean" || typeof exact.tickAuto !== "boolean") fail("schedule");
+      if (exact.activeEgoId !== null && (typeof exact.activeEgoId !== "string" || !data.egoStates[exact.activeEgoId])) fail("active ego identity");
+      for (const pair of exact.egoValues) {
+        if (!Array.isArray(pair) || pair.length !== 2 || typeof pair[0] !== "string" || !Number.isFinite(pair[1])) fail("ego value estimate");
+      }
       for (const [i, agent] of exact.graftAgents.entries()) {
         if (!agent || agent.id !== i + 1) fail("agent identity");
         for (const key of ["lastX", "lastY", "lastHeading", "dwellTicks", "committedAction", "commitmentTimer"]) {

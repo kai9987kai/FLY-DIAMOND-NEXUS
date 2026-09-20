@@ -609,7 +609,8 @@ test("ConnectomeBenchmarkRunner evaluates every default arm with complete paired
     "SingleBrain_AL",
     "CentralComplex_8B",
     "Syncytium_16B_Legacy",
-    "Syncytium_16B"
+    "Syncytium_16B",
+    "Syncytium_22B"
   ]);
 
   for (const arm of result.arms) {
@@ -800,5 +801,4 @@ test("FlyBrainStateSerializer exports tri-agent swarm with beacons and neuropept
   assert.equal(restoredExtra.mission, "Deep Exploration");
   assert.equal(restoredExtra.totalScore, 1250);
 });
-
 

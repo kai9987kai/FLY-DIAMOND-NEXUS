@@ -147,6 +147,12 @@ test('v8 snapshot replays pretrained tri-agent actions, body memory, weights and
     assert.deepEqual(replay.syncytium.brains[i].alToKcWeights, live.syncytium.brains[i].alToKcWeights);
     assert.deepEqual(replay.syncytium.brains[i].specialistMemory, live.syncytium.brains[i].specialistMemory);
   }
+  const stateOf = graft => {
+    const state = JSON.parse(FlyBrainStateSerializer.serialize(graft));
+    delete state.timestamp;
+    return state;
+  };
+  assert.deepEqual(stateOf(replay), stateOf(live), 'full continuation snapshots including PRNG accumulators match');
 });
 
 test('v8 rejects corrupt shapes, non-finite data, mismatched roles and unnormalized coupling atomically', () => {
@@ -160,6 +166,10 @@ test('v8 rejects corrupt shapes, non-finite data, mismatched roles and unnormali
     data => data.exactState.alToKcWeights[0].pop(),
     data => data.exactState.brainEgos[16].arrays.specialistMemory.pop(),
     data => data.exactState.graftAgents[1].lastX = Infinity,
+    data => data.config.ringRate = 'not-a-number',
+    data => data.graftInfluence = '0.5',
+    data => data.exactState.egoValues = [['agent1', 'bad-estimate']],
+    data => data.exactState.brainEgos[0].arrays.alProjection[0] = 1e100,
     data => data.brains[0].kcToMbonWeights[0] = 'oops'
   ]) {
     const data = structuredClone(clean); corrupt(data);
@@ -169,4 +179,16 @@ test('v8 rejects corrupt shapes, non-finite data, mismatched roles and unnormali
   const baseline = new MultiAgentGraphGraft(new SixteenFlyBrainSyncytium(11));
   assert.throws(() => FlyBrainStateSerializer.deserialize(baseline, clean), /22-brain/);
   assert.throws(() => FlyBrainStateSerializer.deserialize(graft, FlyBrainStateSerializer.serialize(baseline)), /Legacy/);
+});
+
+test('restored state owns its imported data rather than aliasing caller objects', () => {
+  const graft = new MultiAgentGraphGraft(new TwentyTwoFlyBrainSyncytium(12));
+  graft.feedback(1, false, { x: 0.3, y: 0.8 });
+  const data = JSON.parse(FlyBrainStateSerializer.serialize(graft));
+  const replay = new MultiAgentGraphGraft(new TwentyTwoFlyBrainSyncytium(13));
+  FlyBrainStateSerializer.deserialize(replay, data);
+  data.engramBank[0].targetX = 99;
+  data.exactState.graftAgents[0].lastFlyProbabilities[0] = 99;
+  assert.equal(replay.syncytium.engramBank[0].targetX, 0.3);
+  assert.notEqual(replay.agent1.lastFlyProbabilities[0], 99);
 });

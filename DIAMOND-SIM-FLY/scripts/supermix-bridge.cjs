@@ -6,7 +6,8 @@ const path = require('node:path');
 const http = require('node:http');
 
 const SCHEMA_VERSION = 1;
-const TARGET_MODEL = 'v92';
+const TARGET_MODEL = 'v91';
+const DEFAULT_RESIDENT_MODEL = 'v91-C-control';
 const AGENTS = ['agent1', 'agent2', 'agent3'];
 const TELEMETRY_FILES = [
   ['v92', 'output/v92_connectome/v92.log'],
@@ -80,7 +81,8 @@ function extractMetrics(text) {
       if (match) { step = Number(match[1]); totalSteps = match[2] ? Number(match[2]) : null; }
     }
     if (loss === null) {
-      const match = line.match(/\b(?:train_)?loss\s*[=:]\s*([0-9]+(?:\.[0-9]+)?(?:e[+-]?\d+)?)/i);
+      const match = line.match(/\b(?:train_)?loss\s*[=:]\s*([0-9]+(?:\.[0-9]+)?(?:e[+-]?\d+)?)/i)
+        || line.match(/\btrain\s+([0-9]+(?:\.[0-9]+)?(?:e[+-]?\d+)?)/i);
       if (match && Number.isFinite(Number(match[1]))) loss = Number(match[1]);
     }
     if (step !== null && loss !== null) break;
@@ -89,30 +91,35 @@ function extractMetrics(text) {
 }
 
 async function readTelemetry(root, now) {
-  if (!root) return { state: 'unavailable', phase: 'unknown', lastUpdate: null, metrics: extractMetrics(''), message: 'No Supermix directory is configured.', activity: [] };
+  if (!root) return { model: null, state: 'unavailable', phase: 'unknown', lastUpdate: null, metrics: extractMetrics(''), message: 'No Supermix directory is configured.', activity: [] };
   const found = await Promise.all(TELEMETRY_FILES.map(async ([id, relative]) => {
     try { return { id, ...(await tailFile(path.join(root, relative))) }; }
     catch { return null; }
   }));
-  const log = found.find(item => item?.id === 'v92');
+  // Training identity is separate from the served v91 model. Prefer the actual v93 chain log.
+  const v93 = found.find(item => item?.id === 'v93-training');
+  const log = v93 || found.find(item => item?.id === 'v92');
+  const trainingModel = v93 ? 'v93' : 'v92';
   const prepared = found.some(item => item?.id === 'v92-launch');
   const activity = found.filter(item => item && !['v92', 'v92-launch'].includes(item.id)).map(item => ({
     source: item.id, modifiedAt: item.modifiedAt, recent: now - Date.parse(item.modifiedAt) < 120000,
   }));
   if (!log) return {
+    model: trainingModel,
     state: prepared ? 'prepared' : 'unavailable', phase: prepared ? 'awaiting-evidence' : 'unknown',
     lastUpdate: null, metrics: extractMetrics(''), activity,
     message: prepared ? 'v92 launch script found; no v92 run log. Active v92 training is unverified.' : 'No v92 telemetry found. Active v92 training is unverified.',
   };
   const recent = now - Date.parse(log.modifiedAt) < 120000;
-  const completed = /\bv92 done\b/i.test(log.text);
+  const completed = trainingModel === 'v92' && /\bv92 done\b/i.test(log.text);
   return {
+    model: trainingModel,
     state: completed ? 'log-complete' : recent ? 'log-updating' : 'idle',
     phase: completed ? 'run-ended' : 'log-observed', lastUpdate: log.modifiedAt,
     metrics: extractMetrics(log.text), activity,
-    message: completed ? 'v92 log records a finished run; this is not model promotion or an inference identity.'
-      : recent ? 'Recent v92 log activity observed; process liveness and successful training are unverified.'
-        : 'v92 log is not recent; active training is unverified.',
+    message: completed ? `${trainingModel} log records a finished run; this is not model promotion or an inference identity.`
+      : recent ? `Recent ${trainingModel} log activity observed; process liveness and successful training are unverified.`
+        : `${trainingModel} log is not recent; active training is unverified.`,
   };
 }
 
@@ -147,9 +154,9 @@ function validateObservation(input) {
   return boundedData({ tick: input.tick, agents: input.agents, world: input.world || {} });
 }
 
-function validateAdvice(payload, observation) {
-  if (!payload || payload.model !== TARGET_MODEL || payload.source !== 'model' || !payload.agents || typeof payload.agents !== 'object') {
-    throw new BridgeError('identity_mismatch', 'Advice did not identify the verified v92 model.');
+function validateAdvice(payload, observation, expectedModel = DEFAULT_RESIDENT_MODEL) {
+  if (!payload || payload.model !== expectedModel || payload.source !== 'model' || !payload.agents || typeof payload.agents !== 'object') {
+    throw new BridgeError('identity_mismatch', 'Advice did not identify the verified resident model.');
   }
   const expected = Object.keys(observation.agents).sort();
   const received = Object.keys(payload.agents).sort();
@@ -163,26 +170,60 @@ function validateAdvice(payload, observation) {
   return { tick: observation.tick, ttl: 30, influence: 0.2, agents: Object.fromEntries(expected.map(id => [id, [...payload.agents[id]]])) };
 }
 
+function parseNativeReply(response, observation, expectedModel) {
+  if (!Array.isArray(response?.results) || response.results.length !== 1 || response.results[0].model !== expectedModel) {
+    throw new BridgeError('identity_mismatch', 'Native response did not identify the requested resident model.');
+  }
+  const result = response.results[0];
+  if (result.error || typeof result.reply !== 'string') throw new BridgeError('invalid_model_reply', 'The resident model did not return a usable reply.');
+  let parsed;
+  try {
+    const clean = result.reply.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i, '$1');
+    parsed = JSON.parse(clean);
+  } catch { throw new BridgeError('invalid_model_reply', 'The resident model replied, but did not produce valid JSON action advice. Local control continues.'); }
+  const agents = parsed?.agents || parsed;
+  if (!agents || typeof agents !== 'object' || Array.isArray(agents)) throw new BridgeError('invalid_model_reply', 'The resident model returned an unsupported action format.');
+  const directions = ['up', 'down', 'left', 'right'];
+  // A named direction is a direct model choice, never a heuristic inferred from prose.
+  const vectors = Object.fromEntries(Object.entries(agents).map(([id, value]) => [id,
+    typeof value === 'string' && directions.includes(value) ? directions.map(direction => direction === value ? 1 : 0) : value]));
+  return validateAdvice({ source: 'model', model: expectedModel, agents: vectors }, observation, expectedModel);
+}
+
 function createBridge(options = {}) {
   const env = options.env || process.env;
   const root = options.root ?? env.SUPERMIX_ROOT ?? (env.USERPROFILE ? path.join(env.USERPROFILE, 'Desktop', 'New folder (9)', 'Supermix') : null);
-  const endpoint = localEndpoint(options.endpoint ?? env.SUPERMIX_ENDPOINT);
+  const adapter = options.adapter ?? env.SUPERMIX_ADAPTER ?? 'native';
+  if (!['native', 'no-load'].includes(adapter)) throw new Error('SUPERMIX_ADAPTER must be native or no-load');
+  const model = options.model ?? env.SUPERMIX_MODEL ?? DEFAULT_RESIDENT_MODEL;
+  if (model !== DEFAULT_RESIDENT_MODEL) throw new Error('Only the available v91-C-control model is authorized for this bridge');
+  // An explicit empty endpoint disables inference. No process is started by this default.
+  const endpoint = localEndpoint(options.endpoint ?? env.SUPERMIX_ENDPOINT ?? 'http://127.0.0.1:8791');
   const now = options.now || Date.now;
   const cacheMs = options.cacheMs ?? 10000;
-  const minAdviceIntervalMs = options.minAdviceIntervalMs ?? 10000;
+  const minAdviceIntervalMs = options.minAdviceIntervalMs ?? 30000;
   const timeoutMs = options.timeoutMs ?? 3500;
   const healthTimeoutMs = options.healthTimeoutMs ?? 1500;
   let cache = null, cachedAt = -Infinity, pendingStatus = null, inferenceReady = false;
   let failures = 0, retryAt = 0, lastAdvice = -Infinity, advicePending = false;
-  const safety = { readOnly: true, minAdviceIntervalMs, maxInfluence: 0.35, maxConcurrentRequests: 1, loadsCheckpoints: false };
+  let lastAdviceError = null;
+  const safety = { readOnly: true, minAdviceIntervalMs, maxInfluence: 0.35, maxConcurrentRequests: 1,
+    startsProcesses: false, changesTraining: false, residencyCheck: adapter === 'native' ? 'best-effort' : 'no-load-contract',
+    loadsCheckpoints: adapter === 'native' ? 'server-managed-residency-race' : false, maxNewTokens: 64 };
 
   function failure() { inferenceReady = false; if (++failures >= 3) retryAt = now() + 60000; cache = null; }
   async function verifyService() {
-    if (!endpoint) throw new BridgeError('inference_unconfigured', 'No already-serving v92 endpoint is configured; telemetry only.');
+    if (!endpoint) throw new BridgeError('inference_unconfigured', 'No already-serving endpoint is configured; telemetry only.');
     if (now() < retryAt) throw new BridgeError('circuit_open', 'Inference requests are cooling down after repeated failures.');
-    const health = await requestJSON(endpoint, '/health', 'GET', null, healthTimeoutMs);
-    if (health.model !== TARGET_MODEL || health.loaded !== true || health.noLoad !== true || health.inferenceOnly !== true) {
-      throw new BridgeError('identity_unverified', 'Endpoint must confirm model v92 is already resident, inference-only, and cannot load checkpoints.');
+    const health = await requestJSON(endpoint, adapter === 'native' ? '/api/models' : '/health', 'GET', null, healthTimeoutMs);
+    if (adapter === 'native') {
+      const entry = Array.isArray(health.models) ? health.models.find(item => item.name === model) : null;
+      if (!entry || entry.resident !== true) throw new BridgeError('model_not_resident', 'v91-C-control is not already resident; the bridge will not request model loading.');
+      // Name alone is insufficient: keep the exact observed checkpoint family.
+      const checkpoint = String(entry.checkpoint || '').replace(/\\/g, '/');
+      if (!/(?:^|\/)output\/v91_control\/v91_control\.pt$/.test(checkpoint)) throw new BridgeError('identity_unverified', 'Resident model checkpoint identity did not match the observed v91 control checkpoint.');
+    } else if (health.model !== model || health.loaded !== true || health.noLoad !== true || health.inferenceOnly !== true) {
+      throw new BridgeError('identity_unverified', 'Endpoint must confirm v91-C-control is already resident, inference-only, and cannot load checkpoints.');
     }
     inferenceReady = true;
     return health;
@@ -193,15 +234,15 @@ function createBridge(options = {}) {
     if (pendingStatus) return pendingStatus;
     pendingStatus = (async () => {
       const training = await readTelemetry(root, now());
-      let reason = 'No already-serving v92 endpoint is configured; telemetry only.';
+      let reason = 'No already-serving endpoint is configured; telemetry only.';
       if (endpoint) {
-        try { await verifyService(); reason = 'Endpoint reports a resident v92 model with no-load inference.'; }
+        try { await verifyService(); reason = adapter === 'native' ? 'Existing native server reports resident v91-C-control. Residency is checked before every bounded request.' : 'Endpoint reports resident v91-C-control with no-load inference.'; }
         catch (error) { reason = error.message; if (error.code !== 'circuit_open') failure(); }
       }
       const result = {
         schemaVersion: SCHEMA_VERSION, targetModel: TARGET_MODEL,
         mode: inferenceReady ? 'inference-ready' : training.state !== 'unavailable' ? 'telemetry-only' : 'unavailable',
-        training, inference: { configured: Boolean(endpoint), ready: inferenceReady, verifiedModel: inferenceReady ? TARGET_MODEL : null, reason, retryAt: retryAt > now() ? new Date(retryAt).toISOString() : null }, safety,
+        training, inference: { configured: Boolean(endpoint), adapter, ready: inferenceReady, verifiedModel: inferenceReady ? model : null, reason, lastAdviceError, retryAt: retryAt > now() ? new Date(retryAt).toISOString() : null }, safety,
       };
       cache = result; cachedAt = now(); return result;
     })();
@@ -210,21 +251,28 @@ function createBridge(options = {}) {
 
   async function advice(input) {
     const observation = validateObservation(input);
-    if (!endpoint) throw new BridgeError('inference_unconfigured', 'No already-serving v92 endpoint is configured; telemetry only.');
-    if (advicePending || now() - lastAdvice < minAdviceIntervalMs) throw new BridgeError('rate_limited', 'Advice is limited to one request every 10 seconds.', 429);
+    if (!endpoint) throw new BridgeError('inference_unconfigured', 'No already-serving endpoint is configured; telemetry only.');
+    if (advicePending || now() - lastAdvice < minAdviceIntervalMs) throw new BridgeError('rate_limited', 'Advice is limited to one request every 30 seconds.', 429);
     if (now() < retryAt) throw new BridgeError('circuit_open', 'Inference requests are cooling down after repeated failures.');
     advicePending = true; lastAdvice = now();
     try {
       // Recheck on every generation. A stale status poll cannot authorize inference.
       await verifyService();
-      const payload = await requestJSON(endpoint, '/advice', 'POST', {
-        schemaVersion: SCHEMA_VERSION, model: TARGET_MODEL, noLoad: true,
-        actionOrder: ['up', 'down', 'left', 'right'], observation,
-      }, timeoutMs);
-      const result = { schemaVersion: SCHEMA_VERSION, source: 'model', model: TARGET_MODEL, advice: validateAdvice(payload, observation) };
-      failures = 0; retryAt = 0; cache = null;
+      let accepted;
+      if (adapter === 'native') {
+        const example = Object.fromEntries(Object.keys(observation.agents).map(id => [id, 'up']));
+        const message = 'Choose a direction for each simulation agent to find resources and avoid danger. Return ONLY JSON mapping each agent to up, down, left, or right, like ' + JSON.stringify(example) + '. Observation: ' + JSON.stringify(observation);
+        if (message.length > 4000) throw new BridgeError('invalid_observation', 'Observation is too large for the native model prompt.', 400);
+        const response = await requestJSON(endpoint, '/api/compare', 'POST', { model, models: [model], message, max_new_tokens: 64, check: false, mode: 'greedy' }, timeoutMs);
+        accepted = parseNativeReply(response, observation, model);
+      } else {
+        const payload = await requestJSON(endpoint, '/advice', 'POST', { schemaVersion: SCHEMA_VERSION, model, noLoad: true, actionOrder: ['up', 'down', 'left', 'right'], observation }, timeoutMs);
+        accepted = validateAdvice(payload, observation, model);
+      }
+      const result = { schemaVersion: SCHEMA_VERSION, source: 'model', model, advice: accepted };
+      failures = 0; retryAt = 0; cache = null; lastAdviceError = null;
       return result;
-    } catch (error) { failure(); throw error; }
+    } catch (error) { lastAdviceError = { code: error.code || 'bridge_unavailable', reason: error.message }; failure(); throw error; }
     finally { advicePending = false; }
   }
 
@@ -279,4 +327,4 @@ function createBridgeHandler(options) {
   };
 }
 
-module.exports = { createBridge, createBridgeHandler, localEndpoint, readTelemetry, validateObservation, validateAdvice, extractMetrics };
+module.exports = { createBridge, createBridgeHandler, localEndpoint, readTelemetry, validateObservation, validateAdvice, parseNativeReply, extractMetrics };

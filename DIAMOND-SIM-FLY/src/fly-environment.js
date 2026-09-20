@@ -27,6 +27,7 @@
       this.dynamic = true;
       this.target = { ...PRESETS.temperate };
       this.weather = { ...this.target, visibility: 1 };
+      this._visibility();
       this.walls = [];
       this.water = [];
       this.refuges = [];
@@ -96,7 +97,7 @@
           const prey = agents.filter(a => !this.has(this.refuges, a.x, a.y))
             .sort((a, b) => Math.hypot(a.x - predator.x, a.y - predator.y) - Math.hypot(b.x - predator.x, b.y - predator.y))[0];
           const choices = DIRECTIONS.map(([dx, dy]) => ({ x: predator.x + dx, y: predator.y + dy }))
-            .filter(p => !this.isBlocked(p.x, p.y) && !this.has(this.refuges, p.x, p.y));
+            .filter(p => !this.isBlocked(p.x, p.y) && !this.has(this.refuges, p.x, p.y) && !this.predators.some(other => other !== predator && other.x === p.x && other.y === p.y));
           if (!choices.length) continue;
           const pursue = prey && Math.hypot(prey.x - predator.x, prey.y - predator.y) < 7;
           if (pursue) choices.sort((a, b) => Math.hypot(a.x - prey.x, a.y - prey.y) - Math.hypot(b.x - prey.x, b.y - prey.y));
@@ -198,8 +199,9 @@
       }
       if (typeof snapshot.dynamic !== 'boolean' || !['temperate', 'rain', 'drought', 'storm', 'calm', 'custom'].includes(snapshot.preset)) throw new Error('Invalid environment settings');
       for (const field of ['resourcesGrown', 'predatorHits']) if (!Number.isInteger(snapshot[field]) || snapshot[field] < 0) throw new Error('Invalid environment counters');
-      Object.assign(model, copy(snapshot));
-      delete model.version;
+      const allowed = ['version', 'size', 'rngState', 'tick', 'preset', 'dynamic', 'target', 'weather', 'walls', 'water', 'refuges', 'predators', 'resourcesGrown', 'predatorHits'];
+      if (Object.keys(snapshot).some(key => !allowed.includes(key))) throw new Error('Unknown environment snapshot field');
+      for (const key of allowed) if (key !== 'version') model[key] = copy(snapshot[key]);
       model._visibility();
       if (['water', 'refuges', 'predators'].some(field => model[field].some(p => model.isBlocked(p.x, p.y)))) throw new Error('Terrain overlaps a wall');
       return model;

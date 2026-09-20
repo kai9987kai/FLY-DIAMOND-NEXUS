@@ -868,20 +868,7 @@ function checkInteractions(agentKey, agentLabel, addDiamond) {
     }
   }
 
-  if(env.diamonds.length === 0) {
-    const rng = new MulberryPRNG(env.seed + simStep);
-    const occupied = new Set([
-      `${env.agent1X},${env.agent1Y}`,`${env.agent2X},${env.agent2Y}`,
-      `${env.agent3X},${env.agent3Y}`,
-      ...env.hazards.map(h=>`${h.x},${h.y}`), ...climate.walls.map(h=>`${h.x},${h.y}`)
-    ]);
-    const start = rng.int(GRID * GRID);
-    for(let attempt=0; attempt<GRID*GRID && env.diamonds.length < DIAMOND_COUNT; attempt++) {
-      const index=(start+attempt)%(GRID*GRID), x=index%GRID, y=Math.floor(index/GRID), k=`${x},${y}`;
-      if(!occupied.has(k)){ env.diamonds.push({x,y}); occupied.add(k); }
-    }
-    logEvent(`🌟 Diamond field respawned (step ${simStep})`, 'ev-milestone');
-  }
+
 }
 
 function step() {
@@ -1008,6 +995,23 @@ function drawWorld() {
       }
     }
   }
+
+  // Terrain and moving predators use distinct shapes as well as colors.
+  for(const [points,color,symbol] of [[climate.water,'#167bad','≈'],[climate.refuges,'#166d59','⌂'],[climate.walls,'#50647d','▦']]) {
+    for(const p of points) {
+      worldCtx.fillStyle=color;worldCtx.globalAlpha=0.7;worldCtx.fillRect(p.x*cw+1,p.y*ch+1,cw-2,ch-2);worldCtx.globalAlpha=1;
+      worldCtx.fillStyle='#d9faff';worldCtx.font='15px system-ui';worldCtx.textAlign='center';worldCtx.textBaseline='middle';worldCtx.fillText(symbol,(p.x+0.5)*cw,(p.y+0.5)*ch);
+    }
+  }
+  for(const p of climate.predators) {
+    const x=(p.x+0.5)*cw,y=(p.y+0.5)*ch;
+    worldCtx.fillStyle='#fb7185';worldCtx.beginPath();worldCtx.moveTo(x,y-9);worldCtx.lineTo(x+9,y+7);worldCtx.lineTo(x-9,y+7);worldCtx.closePath();worldCtx.fill();
+    worldCtx.fillStyle='#111827';worldCtx.font='bold 10px system-ui';worldCtx.textAlign='center';worldCtx.fillText('!',x,y+2);
+  }
+  worldCtx.save();worldCtx.translate(32,32);worldCtx.strokeStyle='#7dd3fc';worldCtx.lineWidth=2;
+  const wind=climate.weather;const wx=wind.windX*15,wy=wind.windY*15;
+  worldCtx.beginPath();worldCtx.moveTo(0,0);worldCtx.lineTo(wx,wy);worldCtx.stroke();worldCtx.fillStyle='#7dd3fc';worldCtx.font='8px system-ui';worldCtx.textAlign='center';worldCtx.fillText('WIND',0,22);worldCtx.restore();
+  worldCtx.textBaseline='alphabetic';
 
   // Grid
   worldCtx.strokeStyle='#0e1c30';
@@ -1398,7 +1402,7 @@ function injectNeuromodulator(type) {
 // ─────────────── God Mode Interactions ───────────────
 function setGodTool(tool) {
   currentGodTool = tool;
-  document.querySelectorAll('.btn-tool').forEach(btn => btn.classList.remove('active'));
+  document.querySelectorAll('.god-mode-bar .btn-tool').forEach(btn => btn.classList.remove('active'));
   const activeBtn = document.getElementById('tool' + tool.charAt(0).toUpperCase() + tool.slice(1));
   if(activeBtn) activeBtn.classList.add('active');
   document.getElementById('cellInfo').textContent = `Tool selected: ${tool.toUpperCase()}. Click canvas to apply.`;
@@ -1420,47 +1424,55 @@ function clearChemicalField() {
   }
 }
 
+const ENV_CONTROLS = [
+  ['temperature','Temperature °C',0,45,1], ['humidity','Humidity',0,1,0.05],
+  ['windX','Wind east / west',-1.5,1.5,0.1], ['windY','Wind south / north',-1.5,1.5,0.1],
+  ['precipitation','Rainfall',0,1,0.05], ['resourceRegrowth','Resource regrowth',0,1,0.05], ['threatActivity','Threat activity',0,1,0.05]
+];
+function syncEnvironmentControls() {
+  const host=document.getElementById('environmentControls');
+  host.innerHTML=ENV_CONTROLS.map(([id,label,min,max,step])=>`<div style="display:grid;grid-template-columns:1fr 100px 32px;gap:6px;align-items:center"><label for="env_${id}">${label}</label><input id="env_${id}" type="range" min="${min}" max="${max}" step="${step}" value="${climate.target[id]}" oninput="setEnvironmentVariable('${id}',this.value)"><span id="envValue_${id}" style="font-size:10px;text-align:right">${climate.weather[id].toFixed(id==='temperature'?0:2)}</span></div>`).join('');
+  document.getElementById('weatherPreset').value=climate.preset;
+  document.getElementById('dynamicWeather').checked=climate.dynamic;
+}
+function setWeatherPreset(name) { climate.setPreset(name); climate.attach(env); syncEnvironmentControls(); updateHUD(); drawWorld(); }
+function setEnvironmentVariable(name,value) { climate.setVariable(name,Number(value)); document.getElementById('weatherPreset').value='custom'; updateHUD(); drawWorld(); }
 let isMouseDown = false;
-worldCanvas.addEventListener('mousedown', (e) => {
-  isMouseDown = true;
-  handleWorldClick(e);
-});
-worldCanvas.addEventListener('mousemove', (e) => {
-  if(isMouseDown && currentGodTool === 'spray') handleWorldClick(e);
-});
-window.addEventListener('mouseup', () => { isMouseDown = false; });
-
+let lastBrushCell = null;
+worldCanvas.style.touchAction='none';
+worldCanvas.addEventListener('pointerdown',e=>{ isMouseDown=true;lastBrushCell=null;worldCanvas.setPointerCapture(e.pointerId);handleWorldClick(e); });
+worldCanvas.addEventListener('pointermove',e=>{ if(isMouseDown && currentGodTool!=='inspect') handleWorldClick(e); });
+worldCanvas.addEventListener('pointerup',()=>{isMouseDown=false;lastBrushCell=null;});
+worldCanvas.addEventListener('pointercancel',()=>{isMouseDown=false;lastBrushCell=null;});
 function handleWorldClick(e) {
-  const rect = worldCanvas.getBoundingClientRect();
-  const scaleX = worldCanvas.width / rect.width;
-  const scaleY = worldCanvas.height / rect.height;
-  const cx = (e.clientX - rect.left) * scaleX;
-  const cy = (e.clientY - rect.top) * scaleY;
-  const gx = Math.floor(cx / (worldCanvas.width / GRID));
-  const gy = Math.floor(cy / (worldCanvas.height / GRID));
-  if(gx < 0 || gx >= GRID || gy < 0 || gy >= GRID) return;
-
-  if(currentGodTool === 'inspect') {
-    const food = chemGrid.sample('foodOdor', gx, gy);
-    const threat = chemGrid.sample('threatOdor', gx, gy);
-    const trail1 = chemGrid.sample('foragerTrail', gx, gy);
-    const custom = chemGrid.sample('customPheromone', gx, gy);
-    document.getElementById('cellInfo').textContent =
-      `Cell (${gx},${gy}) | Food Odor: ${food.toFixed(2)} | Threat: ${threat.toFixed(2)} | Trails: ${(trail1+custom).toFixed(2)}`;
-  } else if(currentGodTool === 'food') {
-    env.diamonds.push({ x: gx, y: gy });
-    chemGrid.emit('foodOdor', gx, gy, 2.0);
-    logEvent(`💎 User dropped diamond at (${gx},${gy})`, 'ev-reward');
-    drawWorld();
-  } else if(currentGodTool === 'hazard') {
-    env.hazards.push({ x: gx, y: gy });
-    chemGrid.emit('threatOdor', gx, gy, 2.0);
-    logEvent(`⚡ User placed hazard at (${gx},${gy})`, 'ev-hazard');
-    drawWorld();
-  } else if(currentGodTool === 'spray') {
-    chemGrid.emit('customPheromone', gx, gy, 1.8);
-    drawWorld();
+  const rect=worldCanvas.getBoundingClientRect();
+  const gx=Math.floor((e.clientX-rect.left)/rect.width*GRID),gy=Math.floor((e.clientY-rect.top)/rect.height*GRID);
+  if(gx<0||gy<0||gx>=GRID||gy>=GRID) return;
+  const cell=`${gx},${gy}`;
+  if(isMouseDown && lastBrushCell===cell) return;
+  lastBrushCell=cell;
+  if(currentGodTool==='inspect') {
+    const info=climate.sense(gx,gy,env);
+    document.getElementById('cellInfo').textContent=`Cell (${gx},${gy}) · food scent ${chemGrid.sample('foodOdor',gx,gy).toFixed(2)} · ${climate.isBlocked(gx,gy)?'wall':info.inWater?'water':info.inRefuge?'refuge':'open'} · predator proximity ${info.predatorProximity.toFixed(2)} · move cost ${climate.movementCost(gx,gy,0,0).toFixed(2)}`;
+    return;
   }
+  const radius=Number(document.getElementById('brushRadius').value),strength=Number(document.getElementById('brushStrength').value);
+  let affected=[];
+  if(currentGodTool==='spray') {
+    for(let y=Math.max(0,gy-radius);y<=Math.min(GRID-1,gy+radius);y++) for(let x=Math.max(0,gx-radius);x<=Math.min(GRID-1,gx+radius);x++) {
+      if(Math.hypot(x-gx,y-gy)>radius) continue;
+      chemGrid.emit('customPheromone',x,y,strength); affected.push({x,y});
+    }
+  } else {
+    affected=climate.brush(env,currentGodTool,gx,gy,radius,strength);
+    for(const {x,y} of affected) {
+      if(currentGodTool==='food') chemGrid.emit('foodOdor',x,y,strength);
+      if(currentGodTool==='hazard'||currentGodTool==='predator') chemGrid.emit('threatOdor',x,y,strength);
+      if(currentGodTool==='erase'||currentGodTool==='wall') for(const channel of CHEM_CHANNELS) chemGrid[channel][y*GRID+x]=0;
+    }
+  }
+  document.getElementById('cellInfo').textContent=`${currentGodTool.toUpperCase()} · ${affected.length} cells at (${gx},${gy}) · radius ${radius} · strength ${strength}. Walls preserve occupied cells and exits.`;
+  drawWorld(); updateHUD();
 }
 
 connectomeCanvas.addEventListener('click', (e) => {
@@ -1482,6 +1494,19 @@ connectomeCanvas.addEventListener('click', (e) => {
 
 // ─────────────── HUD / Sidebar ───────────────
 function updateHUD() {
+  const N=brainCount();
+  document.getElementById('couplingStrength').disabled=N===16;
+  document.getElementById('couplingStrength').title=N===16?'Original 16-brain mode uses fixed coupling':'Coupling strength affects decisions';
+  document.getElementById('couplingValue').textContent=N===16?'fixed':Number(syncytium.config.couplingStrength??0.8).toFixed(1);
+  document.getElementById('networkSummary').textContent=`${N} Fly Brains · Three Agents · ${(N*N*4).toLocaleString()} Action Channels`;
+  document.getElementById('connectomeTitle').textContent=`${N}-Brain Connectome · click a node`;
+  document.getElementById('brainMetersTitle').textContent=`${N}-Brain Activity Meters`;
+  document.getElementById('btnMatrix').textContent=`Synaptic Matrix (${N}×${N})`;
+  document.getElementById('matrixTitle').textContent=`${N}×${N} Commissural Matrix (${(N*N*4).toLocaleString()} Action Channels)`;
+  document.getElementById('tmSynapses').textContent=`${N*N*4} (${N}×${N}×4)`;
+  for(const [key] of ENV_CONTROLS) {const el=document.getElementById('envValue_'+key);if(el) el.textContent=climate.weather[key].toFixed(key==='temperature'?0:2);}
+  document.getElementById('environmentStats').textContent=`${env.diamonds.length} food · ${climate.predators.length} predators · ${climate.refuges.length} refuge cells · ${climate.walls.length} walls · visibility ${Math.round(climate.weather.visibility*100)}% · ${climate.resourcesGrown} regrown`;
+
   document.getElementById('hudStep').textContent=simStep;
   document.getElementById('hudDiamonds').textContent=env.diamondsCollected||0;
   document.getElementById('hudHazards').textContent=env.hazardsHit||0;
@@ -1676,23 +1701,22 @@ function applySeedRandom() {
 }
 
 // ─────────────── Persistence ───────────────
+const CHEM_CHANNELS=['foodOdor','threatOdor','foragerTrail','sentinelTrail','customPheromone'];
+function captureState() {
+  return FlyBrainStateSerializer.serialize(graft,{
+    worldSeed:env.seed, agent1X:env.agent1X,agent1Y:env.agent1Y,agent2X:env.agent2X,agent2Y:env.agent2Y,agent3X:env.agent3X,agent3Y:env.agent3Y,
+    agent1Energy:env.agent1Energy,agent2Energy:env.agent2Energy,agent3Energy:env.agent3Energy,
+    diamonds:env.diamonds,hazards:env.hazards,diamondsCollected:env.diamondsCollected,hazardsHit:env.hazardsHit,
+    trails:{a1:a1Trail,a2:a2Trail,a3:a3Trail},simStep,a1Diamonds,a2Diamonds,a3Diamonds,
+    environment:climate.snapshot(),chemicalField:Object.fromEntries(CHEM_CHANNELS.map(channel=>[channel,Array.from(chemGrid[channel])])),
+    ui:{brushRadius:Number(document.getElementById('brushRadius').value),brushStrength:Number(document.getElementById('brushStrength').value),
+      graphDensity:Number(document.getElementById('graphDensity').value),graphThreshold:Number(document.getElementById('graphThreshold').value),graphFocus:document.getElementById('graphFocus').checked}
+  });
+}
 function saveState(silent=false) {
   if(!graft) return;
-  try {
-    const json=FlyBrainStateSerializer.serialize(graft,{
-      worldSeed:env.seed, agent1X:env.agent1X, agent1Y:env.agent1Y,
-      agent2X:env.agent2X, agent2Y:env.agent2Y,
-      agent3X:env.agent3X, agent3Y:env.agent3Y,
-      agent1Energy:env.agent1Energy, agent2Energy:env.agent2Energy,
-      agent3Energy:env.agent3Energy,
-      diamonds:env.diamonds, hazards:env.hazards,
-      diamondsCollected:env.diamondsCollected, hazardsHit:env.hazardsHit,
-      trails:{ a1:a1Trail, a2:a2Trail, a3:a3Trail },
-      simStep, a1Diamonds, a2Diamonds, a3Diamonds
-    });
-    localStorage.setItem(FlyBrainStateSerializer.STORAGE_KEY, json);
-    if(!silent) logEvent('💾 State v7 saved to localStorage', 'ev-milestone');
-  } catch(e){ console.error('Save failed',e); }
+  try { localStorage.setItem(FlyBrainStateSerializer.STORAGE_KEY,captureState());if(!silent) logEvent('State saved with climate, terrain and chemical fields','ev-milestone'); }
+  catch(e) { logEvent('Save failed: '+e.message,'ev-hazard'); }
 }
 
 function loadState() {
@@ -1705,14 +1729,14 @@ function loadState() {
 
 function exportStateFile() {
   if(!graft) return;
-  saveState(true);
-  const json=localStorage.getItem(FlyBrainStateSerializer.STORAGE_KEY)||'{}';
+  let json;
+  try { json=captureState(); } catch(e) { logEvent('Export failed: '+e.message,'ev-hazard');return; }
   const blob=new Blob([json],{type:'application/json'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a'); a.href=url;
-  a.download=`fly-nexus-16brains-v5-${Date.now()}.json`; a.click();
+  a.download=`fly-nexus-${brainCount()}brains-${Date.now()}.json`; a.click();
   URL.revokeObjectURL(url);
-  logEvent('⬇ 16-Brain State exported to file','ev-milestone');
+  logEvent('⬇ Network and environment state exported to file','ev-milestone');
 }
 
 function importStateFile(evt) {
@@ -1725,36 +1749,54 @@ function importStateFile(evt) {
 
 function _restoreFromJson(json) {
   try {
-    pauseSim();
-    const parsed = typeof json === "string" ? JSON.parse(json) : json;
-    const seed=parsed.extraAgentData?.worldSeed||parsed.worldSeed||2077;
-    makeSyncytium(seed);
-    env=generateWorld(seed);
-
-    FlyBrainStateSerializer.deserialize(graft, json);
-
-    const ex=parsed.extraAgentData||{};
-    if(ex.agent1X!==undefined){ env.agent1X=ex.agent1X; env.agent1Y=ex.agent1Y; env.agent1Energy=ex.agent1Energy||INIT_ENERGY; }
-    if(ex.agent2X!==undefined){ env.agent2X=ex.agent2X; env.agent2Y=ex.agent2Y; env.agent2Energy=ex.agent2Energy||INIT_ENERGY; }
-    if(ex.agent3X!==undefined){ env.agent3X=ex.agent3X; env.agent3Y=ex.agent3Y; env.agent3Energy=ex.agent3Energy||INIT_ENERGY; }
-    if(ex.diamonds) env.diamonds=ex.diamonds;
-    if(ex.hazards) env.hazards=ex.hazards;
-    if(ex.diamondsCollected) env.diamondsCollected=ex.diamondsCollected;
-    if(ex.hazardsHit) env.hazardsHit=ex.hazardsHit;
-    if(ex.simStep) simStep=ex.simStep;
-    if(ex.a1Diamonds) a1Diamonds=ex.a1Diamonds;
-    if(ex.a2Diamonds) a2Diamonds=ex.a2Diamonds;
-    if(ex.a3Diamonds) a3Diamonds=ex.a3Diamonds;
-    // Trails are display history; a save without them starts fresh from the
-    // restored positions rather than showing another run's path.
-    a1Trail = ex.trails?.a1 || [{x: env.agent1X, y: env.agent1Y}];
-    a2Trail = ex.trails?.a2 || [{x: env.agent2X, y: env.agent2Y}];
-    a3Trail = ex.trails?.a3 || [{x: env.agent3X, y: env.agent3Y}];
-
-    if(syncytium.isPretrained) document.getElementById('pretrainedBadge').style.display='';
-    drawWorld(); drawConnectome(); updateHUD(); updateSidebar(null); updateInspector();
-    logEvent('📂 16-Brain state restored from save','ev-milestone');
-  } catch(e){ logEvent('Load failed: '+e.message,'ev-hazard'); console.error(e); }
+    const parsed=typeof json==='string'?JSON.parse(json):json;
+    const ex=parsed.extraAgentData||{},seed=ex.worldSeed??parsed.worldSeed??2077;
+    const count=parsed.brainCount??parsed.brains?.length??16;
+    if(![16,22].includes(count)) throw new Error('Unsupported brain count');
+    const Network=count===22?TwentyTwoFlyBrainSyncytium:SixteenFlyBrainSyncytium;
+    const nextGraft=new MultiAgentGraphGraft(new Network(seed));
+    FlyBrainStateSerializer.deserialize(nextGraft,parsed);
+    const nextEnv=generateWorld(seed);
+    const nextClimate=ex.environment?FlyEnvironment.restore(ex.environment):new FlyEnvironment(seed,GRID);
+    if(nextClimate.size!==GRID) throw new Error('Saved arena has a different size');
+    for(const id of ['agent1','agent2','agent3']) {
+      if(ex[id+'X']===undefined) continue;
+      for(const axis of ['X','Y']) { const n=ex[id+axis];if(!Number.isInteger(n)||n<0||n>=GRID) throw new Error('Invalid agent coordinates');nextEnv[id+axis]=n; }
+      const energy=ex[id+'Energy']??INIT_ENERGY;
+      if(!Number.isFinite(energy)||energy<0||energy>ENERGY_MAX+50) throw new Error('Invalid agent energy');
+      nextEnv[id+'Energy']=energy;
+      if(nextClimate.isBlocked(nextEnv[id+'X'],nextEnv[id+'Y'])) throw new Error('Saved agent overlaps a wall');
+    }
+    for(const field of ['diamonds','hazards']) if(ex[field]) {
+      if(!Array.isArray(ex[field])||ex[field].length>GRID*GRID||ex[field].some(p=>!Number.isInteger(p.x)||!Number.isInteger(p.y)||nextClimate.isBlocked(p.x,p.y)|| (p.strength!==undefined&&(!Number.isFinite(p.strength)||p.strength<0.25||p.strength>3)))) throw new Error('Invalid saved resources');
+      nextEnv[field]=structuredClone(ex[field]);
+    }
+    for(const field of ['diamondsCollected','hazardsHit','simStep','a1Diamonds','a2Diamonds','a3Diamonds']) if(ex[field]!==undefined&&(!Number.isInteger(ex[field])||ex[field]<0)) throw new Error('Invalid saved counter');
+    nextEnv.diamondsCollected=ex.diamondsCollected??0; nextEnv.hazardsHit=ex.hazardsHit??0;
+    const nextChem=new ChemicalFieldGrid(GRID,GRID);
+    if(ex.chemicalField) for(const channel of CHEM_CHANNELS) {
+      const values=ex.chemicalField[channel];
+      if(!Array.isArray(values)||values.length!==GRID*GRID||values.some(n=>!Number.isFinite(n)||n<0||n>3.001)) throw new Error('Invalid chemical field');
+      nextChem[channel].set(values);
+    }
+    // Commit only after the full brain, arena and chemical payload validates.
+    pauseSim(); graft=nextGraft;syncytium=nextGraft.syncytium;env=nextEnv;climate=nextClimate;chemGrid=nextChem;climate.attach(env);
+    simStep=ex.simStep??0;a1Diamonds=ex.a1Diamonds??0;a2Diamonds=ex.a2Diamonds??0;a3Diamonds=ex.a3Diamonds??0;lastResult=null;
+    const safeTrail=(trail,x,y)=>Array.isArray(trail)&&trail.length<=24&&trail.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y))?trail:[{x,y}];
+    a1Trail=safeTrail(ex.trails?.a1,env.agent1X,env.agent1Y);a2Trail=safeTrail(ex.trails?.a2,env.agent2X,env.agent2Y);a3Trail=safeTrail(ex.trails?.a3,env.agent3X,env.agent3Y);
+    selectedBrainId=Math.min(selectedBrainId,count-1);
+    document.getElementById('brainMode').value=String(count);document.getElementById('seedInput').value=seed;
+    for(const [id,min,max] of [['brushRadius',0,4],['brushStrength',0.25,3],['graphDensity',10,100],['graphThreshold',0,1]]) if(Number.isFinite(ex.ui?.[id])) document.getElementById(id).value=Math.max(min,Math.min(max,ex.ui[id]));
+    document.getElementById('brushRadiusValue').textContent=document.getElementById('brushRadius').value;
+    document.getElementById('brushStrengthValue').textContent=document.getElementById('brushStrength').value;
+    document.getElementById('graphFocus').checked=Boolean(ex.ui?.graphFocus);
+    const coupling=syncytium.config.couplingStrength??0.8;
+    document.getElementById('couplingStrength').value=coupling;document.getElementById('couplingValue').textContent=Number(coupling).toFixed(1);
+    document.getElementById('pretrainedBadge').style.display=syncytium.isPretrained?'':'none';
+    syncEnvironmentControls();buildBrainMeters();drawWorld();drawConnectome();updateHUD();updateSidebar(null);updateInspector();
+    logEvent(`Restored ${count}-brain state${ex.environment?' with climate and chemical fields':' (legacy save: environment starts fresh)'}`,'ev-milestone');
+    return true;
+  } catch(e) {logEvent('Load failed: '+e.message,'ev-hazard');return false;}
 }
 
 // ─────────────── Matrix Modal (16x16 Heatmap) ───────────────
@@ -1824,7 +1866,7 @@ function renderMatrixGrid() {
       }
 
       const displayVal = val >= 0 ? `+${val.toFixed(2)}` : val.toFixed(2);
-      html += `<td><div class="matrix-cell" style="background:${bg};color:${col}" 
+      html += `<td><div class="matrix-cell" style="background:${bg};color:${col}"
                 onclick="tweakSynapse(${src}, ${dst}, event.shiftKey ? -0.05 : 0.05)"
                 onmouseenter="showMatrixTooltip(${src}, ${dst}, ${val})"
                 onmouseleave="clearMatrixTooltip()">${displayVal}</div></td>`;
@@ -2017,6 +2059,9 @@ window.flyLab = {
   get graft() { return graft; },
   get syncytium() { return syncytium; },
   get chemGrid() { return chemGrid; },
+  get climate() { return climate; },
+  get tick() { return syncytium.tickCount; },
+  get ticks() { return syncytium.tickCount; },
   get running() { return simRunning; },
   get simStep() { return simStep; },
   get lastResult() { return lastResult; },
@@ -2028,7 +2073,16 @@ window.flyLab = {
   reset: resetSim,
   save: () => saveState(true),
   load: loadState,
-  serialize: () => FlyBrainStateSerializer.serialize(graft, { worldSeed: env.seed })
+  serialize: captureState,
+  restore: _restoreFromJson,
+  observation() {
+    const agents={};
+    for(const [id,other] of [['agent1','agent2'],['agent2','agent1'],['agent3','agent1']]) {
+      const sensory=buildSensoryObs(env[id+'X'],env[id+'Y'],env[id+'Energy'],env[other+'X'],env[other+'Y'],graft[id].lastHeading);
+      agents[id]={x:env[id+'X'],y:env[id+'Y'],energy:env[id+'Energy'],sensory:Array.from(sensory),environment:sensory.environment,legalActions:sensory.environment.legalActions};
+    }
+    return {tick:syncytium.tickCount,agents,world:{seed:env.seed,gridSize:GRID,weather:{...climate.weather}}};
+  }
 };
 
 /** Compact text state, matching the World Lab's hook of the same name. */
@@ -2036,6 +2090,10 @@ window.render_game_to_text = function () {
   const tel = syncytium.getTelemetry();
   return JSON.stringify({
     step: simStep,
+    brainCount: brainCount(),
+    coordinateSystem: "origin top-left; x east, y south",
+    environment: {weather:climate.weather,walls:climate.walls,water:climate.water,refuges:climate.refuges,predators:climate.predators,resourcesGrown:climate.resourcesGrown},
+    food:env.diamonds,hazards:env.hazards,
     tick: tel.tick,
     seed: env.seed,
     compassMode: tel.compassMode,
@@ -2056,6 +2114,8 @@ window.render_game_to_text = function () {
   });
 };
 
+window.advanceTime = ms => window.flyLab.advance(Math.max(1,Math.round(ms/simSpeed)));
+
 // ─────────────── Boot ───────────────
 initSim();
 const _autoSaved = FlyBrainStateSerializer.readRawFromLocalStorage();
@@ -2069,5 +2129,6 @@ if(_autoSaved) {
   } catch(e){}
 }
 </script>
+<script src="src/fly-supermix-client.js"></script>
 </body>
 </html>

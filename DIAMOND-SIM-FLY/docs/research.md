@@ -13,6 +13,8 @@ Two labs are covered. [World Lab](#world-lab-model) is a reward-field planning s
 
 ## Fly Lab: *Drosophila* circuit models
 
+The September 20 expansion adds six functional specialist modules to the original sixteen. Current source mapping, recent 2026 research and implementation boundaries are recorded in [the expansion design](fly-lab-22-design.md). Historical circuit measurements below concern the sixteen-module version. Neither version loads an anatomical connectome at runtime.
+
 The Fly Lab (`src/fly-brain-engine.js`, `src/fly-lif-circuit.js`) simulates 16 specialised neuropil models sharing one connectome. Where a circuit is named after a fly structure, it now implements the mechanism that structure is known for; the previous behaviour of each is retained as a selectable `"legacy"` preset so an upgrade can be measured rather than asserted.
 
 | Source | Relevant idea | What this project implements |

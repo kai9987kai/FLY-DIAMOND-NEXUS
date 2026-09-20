@@ -8,8 +8,8 @@ const path = require('node:path');
 const { createBridge, createBridgeHandler, localEndpoint, readTelemetry, validateObservation, validateAdvice } = require('../scripts/supermix-bridge.cjs');
 
 const observation = { tick: 10, agents: { agent1: { x: 4, y: 5, energy: 0.8 } }, world: { width: 20, height: 20 } };
-const health = { model: 'v92', loaded: true, noLoad: true, inferenceOnly: true };
-const advice = { model: 'v92', source: 'model', agents: { agent1: [0.1, -0.2, 0, 1] } };
+const health = { model: 'v91-C-control', loaded: true, noLoad: true, inferenceOnly: true };
+const advice = { model: 'v91-C-control', source: 'model', agents: { agent1: [0.1, -0.2, 0, 1] } };
 
 async function fixture(t, handler) {
   const calls = [];
@@ -35,7 +35,7 @@ test('endpoint configuration accepts literal loopback origins only', () => {
 });
 
 test('unconfigured bridge never labels telemetry as model inference', async () => {
-  const bridge = createBridge({ env: {}, root: null });
+  const bridge = createBridge({ env: {}, root: null, adapter: 'no-load', endpoint: '' });
   const status = await bridge.status();
   assert.equal(status.mode, 'unavailable');
   assert.equal(status.inference.ready, false);
@@ -65,9 +65,9 @@ test('telemetry reads bounded fixed logs and marks launch scripts as prepared on
 });
 
 test('service must report already resident v92 and a no-load inference contract', async t => {
-  for (const badHealth of [{ model: 'v91', loaded: true }, { ...health, loaded: false }, { ...health, noLoad: false }, { ...health, inferenceOnly: false }, { status: 'ok', models: ['v92'] }]) {
+  for (const badHealth of [{ model: 'v89', loaded: true }, { ...health, loaded: false }, { ...health, noLoad: false }, { ...health, inferenceOnly: false }, { status: 'ok', models: ['v92'] }]) {
     const service = await fixture(t, (req, res) => reply(res, badHealth));
-    const bridge = createBridge({ ...service, env: {}, root: null });
+    const bridge = createBridge({ ...service, env: {}, root: null, adapter: 'no-load' });
     const status = await bridge.status();
     assert.equal(status.inference.ready, false);
     await assert.rejects(bridge.advice(observation), { code: 'identity_unverified' });
@@ -77,10 +77,10 @@ test('service must report already resident v92 and a no-load inference contract'
 
 test('validated model advice is bounded and tied to the requesting simulation tick', async t => {
   const service = await fixture(t, (req, res) => reply(res, req.url === '/health' ? health : { ...advice, tick: 999999, ttl: 1000, influence: 1 }));
-  const bridge = createBridge({ ...service, env: {}, root: null });
+  const bridge = createBridge({ ...service, env: {}, root: null, adapter: 'no-load' });
   assert.equal((await bridge.status()).mode, 'inference-ready');
   const result = await bridge.advice({ ...observation, endpoint: 'http://example.com', path: '/secret' });
-  assert.deepEqual(result, { schemaVersion: 1, source: 'model', model: 'v92', advice: { tick: 10, ttl: 30, influence: 0.2, agents: advice.agents } });
+  assert.deepEqual(result, { schemaVersion: 1, source: 'model', model: 'v91-C-control', advice: { tick: 10, ttl: 30, influence: 0.2, agents: advice.agents } });
   const sent = service.calls.find(call => call.route === '/advice').body;
   assert.deepEqual(sent.observation, observation);
   assert.equal(sent.noLoad, true);
@@ -111,7 +111,7 @@ test('observations cannot inject file paths, service URLs, arbitrary agents, or 
 test('health and generation failures open a cooldown circuit', async t => {
   let time = 100000;
   const service = await fixture(t, (req, res) => reply(res, {}, 503));
-  const bridge = createBridge({ ...service, env: {}, root: null, now: () => time, cacheMs: 0 });
+  const bridge = createBridge({ ...service, env: {}, root: null, adapter: 'no-load', now: () => time, cacheMs: 0 });
   for (let i = 0; i < 3; i++) { await bridge.status(); time += 10000; }
   assert.equal(service.calls.length, 3);
   const cooling = await bridge.status();
@@ -125,7 +125,7 @@ test('health and generation failures open a cooldown circuit', async t => {
 
 test('slow generation is aborted and cannot produce stale advice', async t => {
   const service = await fixture(t, (req, res) => { if (req.url === '/health') reply(res, health); });
-  const bridge = createBridge({ ...service, env: {}, root: null, timeoutMs: 40 });
+  const bridge = createBridge({ ...service, env: {}, root: null, adapter: 'no-load', timeoutMs: 40 });
   await assert.rejects(bridge.advice(observation), { code: 'timeout' });
 });
 
@@ -135,7 +135,7 @@ test('status is cached and concurrent advice is refused', async t => {
     if (req.url === '/health') reply(res, health);
     else pending = res;
   });
-  const bridge = createBridge({ ...service, env: {}, root: null });
+  const bridge = createBridge({ ...service, env: {}, root: null, adapter: 'no-load' });
   await Promise.all([bridge.status(), bridge.status(), bridge.status()]);
   await bridge.status();
   assert.equal(service.calls.length, 1);
@@ -149,13 +149,13 @@ test('status is cached and concurrent advice is refused', async t => {
 
 test('redirects are rejected without contacting another endpoint', async t => {
   const service = await fixture(t, (req, res) => { res.writeHead(302, { Location: 'http://example.com' }); res.end(); });
-  const bridge = createBridge({ ...service, env: {}, root: null });
+  const bridge = createBridge({ ...service, env: {}, root: null, adapter: 'no-load' });
   await assert.rejects(bridge.advice(observation), { code: 'service_unavailable' });
   assert.equal(service.calls.length, 1);
 });
 
 test('HTTP handler requires local same-origin JSON and exposes no proxy route', async t => {
-  const handler = createBridgeHandler({ env: {}, root: null });
+  const handler = createBridgeHandler({ env: {}, root: null, adapter: 'no-load', endpoint: '' });
   const server = http.createServer(async (req, res) => { if (!await handler(req, res)) { res.writeHead(404); res.end(); } });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
@@ -165,8 +165,11 @@ test('HTTP handler requires local same-origin JSON and exposes no proxy route', 
   assert.equal((await response.json()).inference.ready, false);
   response = await fetch(`${origin}/api/supermix/status`, { headers: { Origin: 'https://example.com' } });
   assert.equal(response.status, 403);
-  response = await fetch(`${origin}/api/supermix/status`, { headers: { Host: 'attacker.invalid' } });
-  assert.equal(response.status, 403);
+  // Node fetch replaces Host; use a raw HTTP client to exercise DNS-rebinding rejection.
+  const hostileStatus = await new Promise((resolve, reject) => {
+    http.get(`${origin}/api/supermix/status`, { headers: { Host: 'attacker.invalid' } }, result => { result.resume(); resolve(result.statusCode); }).on('error', reject);
+  });
+  assert.equal(hostileStatus, 403);
   response = await fetch(`${origin}/api/supermix/advice`, { method: 'POST', body: JSON.stringify(observation) });
   assert.equal(response.status, 415);
   response = await fetch(`${origin}/api/supermix/advice`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin }, body: JSON.stringify(observation) });
@@ -174,4 +177,49 @@ test('HTTP handler requires local same-origin JSON and exposes no proxy route', 
   assert.equal((await response.json()).error, 'inference_unconfigured');
   response = await fetch(`${origin}/api/supermix/proxy?url=http://example.com`);
   assert.equal(response.status, 404);
+});
+
+test('native adapter admits only the already resident observed v91 control checkpoint', async t => {
+  for (const entry of [
+    { name: 'v91-C-control', resident: false, checkpoint: 'output/v91_control/v91_control.pt' },
+    { name: 'v91-A-connectome', resident: true, checkpoint: 'output/v91_cns_connectome/v91_cns_connectome.pt' },
+    { name: 'v91-C-control', resident: true, checkpoint: 'output/another/model.pt' },
+  ]) {
+    const service = await fixture(t, (req, res) => reply(res, { models: [entry] }));
+    const bridge = createBridge({ ...service, env: {}, root: null, adapter: 'native' });
+    await assert.rejects(bridge.advice(observation));
+    assert.deepEqual(service.calls.map(call => call.route), ['/api/models']);
+  }
+});
+
+test('native adapter uses a stateless single-model bounded request and exact named directions', async t => {
+  const service = await fixture(t, (req, res) => reply(res, req.url === '/api/models'
+    ? { models: [{ name: 'v91-C-control', resident: true, checkpoint: 'output/v91_control/v91_control.pt' }] }
+    : { results: [{ model: 'v91-C-control', reply: '{"agent1":"left"}' }] }));
+  const bridge = createBridge({ ...service, env: {}, root: null });
+  const status = await bridge.status();
+  assert.equal(status.targetModel, 'v91');
+  assert.equal(status.inference.verifiedModel, 'v91-C-control');
+  assert.equal(status.safety.residencyCheck, 'best-effort');
+  const result = await bridge.advice(observation);
+  assert.deepEqual(result.advice.agents.agent1, [0, 0, 1, 0]);
+  assert.equal(result.model, 'v91-C-control');
+  assert.deepEqual(service.calls.map(call => call.route), ['/api/models', '/api/models', '/api/compare']);
+  const payload = service.calls[2].body;
+  assert.equal(payload.model, 'v91-C-control');
+  assert.deepEqual(payload.models, ['v91-C-control']);
+  assert.equal(payload.max_new_tokens, 64);
+  assert.equal(payload.check, false);
+  assert.equal(payload.mode, 'greedy');
+  assert.equal(payload.session_id, undefined);
+});
+
+test('native prose is rejected rather than interpreted as model action advice', async t => {
+  const service = await fixture(t, (req, res) => reply(res, req.url === '/api/models'
+    ? { models: [{ name: 'v91-C-control', resident: true, checkpoint: 'output/v91_control/v91_control.pt' }] }
+    : { results: [{ model: 'v91-C-control', reply: 'The answer is 42. Go left.' }] }));
+  const bridge = createBridge({ ...service, env: {}, root: null });
+  await assert.rejects(bridge.advice(observation), { code: 'invalid_model_reply' });
+  const status = await bridge.status();
+  assert.equal(status.inference.lastAdviceError.code, 'invalid_model_reply');
 });

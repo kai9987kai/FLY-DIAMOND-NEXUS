@@ -11,6 +11,16 @@ test('weather, regrowth and predators replay exactly across a snapshot', () => {
   for (let i = 0; i < 200; i++) { a.step(envA); b.step(envB); }
   assert.deepEqual(a.snapshot(), b.snapshot()); assert.deepEqual(envA, envB);
 });
+test('a fresh environment round-trips before any weather tick', () => {
+  const climate = new FlyEnvironment(2077), restored = FlyEnvironment.restore(climate.snapshot());
+  assert.deepEqual(restored.snapshot(), climate.snapshot());
+  assert.deepEqual(restored.sense(1, 1, world()), climate.sense(1, 1, world()));
+});
+test('unknown imported fields cannot replace environment methods', () => {
+  const snapshot = new FlyEnvironment(5).snapshot();
+  assert.throws(() => FlyEnvironment.restore({ ...snapshot, random: 0 }), /Unknown/);
+  assert.throws(() => FlyEnvironment.restore({ ...snapshot, brush: null }), /Unknown/);
+});
 test('wall brush protects each fly and its exits, deduplicates and erases terrain', () => {
   const climate = new FlyEnvironment(10), env = world();
   climate.brush(env, 'wall', 2, 2, 3, 2);
@@ -36,6 +46,12 @@ test('resource placement stays bounded in a fully occupied arena', () => {
   climate.setVariable('resourceRegrowth', 1); climate.setVariable('humidity', 1);
   for (let i = 0; i < 100; i++) climate.step(env);
   assert.equal(env.diamonds.length, 0);
+});
+test('zero resource regrowth keeps a depleted arena empty', () => {
+  const climate = new FlyEnvironment(1), env = world(); env.diamonds = [];
+  climate.setVariable('resourceRegrowth', 0);
+  for (let i = 0; i < 300; i++) climate.step(env);
+  assert.equal(env.diamonds.length, 0); assert.equal(climate.resourcesGrown, 0);
 });
 test('invalid snapshot state is rejected without changing active state', () => {
   const climate = new FlyEnvironment(10); const state = climate.snapshot();
