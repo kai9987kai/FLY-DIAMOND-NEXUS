@@ -360,7 +360,8 @@ test("FlyBrainStateSerializer v4 exports 11-brain state with dual-agent regimes 
   assert.ok(typeof json === "string", "Serialized state must be a JSON string");
 
   const parsed = JSON.parse(json);
-  assert.ok(parsed.version === "5.0.0" || parsed.version === "6.0.0", "Serialized version must be 5.0.0 or 6.0.0");
+  assert.ok(/^\d+\.\d+\.\d+$/.test(parsed.version), "Serialized state must carry a semantic version");
+  assert.ok(Number(parsed.version.split(".")[0]) >= 5, "Serialized version must be 5.0.0 or newer");
   assert.equal(parsed.brains.length, 16, "Must serialize 16 brains");
   assert.ok(parsed.agents, "Must serialize agents object");
   assert.ok(parsed.agents.agent1, "Must have agent1 state");
@@ -593,7 +594,7 @@ test("ConnectomeBenchmarkRunner runs episodes deterministically and computes pai
 // ──────────────────────────────────────────────────────────────────────────────
 // 26. Connectome Benchmark — Comparative 4-Arm Evaluation
 // ──────────────────────────────────────────────────────────────────────────────
-test("ConnectomeBenchmarkRunner evaluates 4 policy arms with complete paired statistics", async () => {
+test("ConnectomeBenchmarkRunner evaluates every default arm with complete paired statistics", async () => {
   const { ConnectomeBenchmarkRunner } = require("../src/connectome-benchmark.js");
   const runner = new ConnectomeBenchmarkRunner();
 
@@ -603,12 +604,11 @@ test("ConnectomeBenchmarkRunner evaluates 4 policy arms with complete paired sta
     seeds: [101, 202, 303]
   });
 
-  assert.equal(result.arms.length, 4);
-  const armNames = result.arms.map(a => a.arm);
-  assert.deepEqual(armNames, [
+  assert.deepEqual(result.arms.map(a => a.arm), [
     "RandomWalk",
     "SingleBrain_AL",
     "CentralComplex_8B",
+    "Syncytium_16B_Legacy",
     "Syncytium_16B"
   ]);
 
@@ -617,7 +617,11 @@ test("ConnectomeBenchmarkRunner evaluates 4 policy arms with complete paired sta
     assert.ok(Number.isFinite(arm.meanNetScore));
     assert.ok(Number.isFinite(arm.meanDiamonds));
     assert.ok(Number.isFinite(arm.winRate));
+    assert.ok(Number.isFinite(arm.iqmNetScore));
   }
+
+  assert.equal(result.reference, "RandomWalk");
+  assert.equal(result.comparisons.length, result.arms.length - 1);
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -755,9 +759,9 @@ test("Tri-Trophic Swarm acoustic resonance activates when 3 agents form spatial 
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// 32. v6.0.0 State Serialization Round-Trip — Tri-Agent, Beacons, and Neuropeptides
+// 32. Current State Serialization Round-Trip — Tri-Agent, Beacons, and Neuropeptides
 // ──────────────────────────────────────────────────────────────────────────────
-test("FlyBrainStateSerializer v6.0.0 exports tri-agent swarm with beacons and neuropeptides and restores exactly", () => {
+test("FlyBrainStateSerializer exports tri-agent swarm with beacons and neuropeptides and restores exactly", () => {
   const syncytium = new SixteenFlyBrainSyncytium(42);
   const graft = new MultiAgentGraphGraft(syncytium, 0.7);
 
@@ -777,7 +781,7 @@ test("FlyBrainStateSerializer v6.0.0 exports tri-agent swarm with beacons and ne
   const json = FlyBrainStateSerializer.serialize(graft, extra);
 
   const parsed = JSON.parse(json);
-  assert.equal(parsed.version, "6.0.0", "Serialized version must be 6.0.0");
+  assert.equal(parsed.version, "7.0.0", "Serialized version must be 7.0.0");
   assert.ok(parsed.agents.agent3, "Agent 3 state must be present in serialization");
   assert.equal(parsed.agents.agent3.regime, "MAP_BEACON");
   assert.ok(Array.isArray(parsed.beaconWaypoints), "beaconWaypoints must be serialized");

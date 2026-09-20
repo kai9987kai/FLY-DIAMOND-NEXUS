@@ -5,12 +5,38 @@ const {chromium}=require('playwright');
 const base=process.env.BASE_URL||'http://127.0.0.1:8080';
 const out=path.resolve('output/browser');fs.mkdirSync(out,{recursive:true});
 
+// Use a Chromium that is already on the machine when there is one, rather than
+// insisting on the exact build this Playwright version would download. Set
+// CHROMIUM_PATH to point somewhere else.
+function resolveChromium(){
+  const candidates=[process.env.CHROMIUM_PATH,'/opt/pw-browsers/chromium'].filter(Boolean);
+  for(const candidate of candidates){
+    try { if(fs.existsSync(candidate)) return candidate; } catch {}
+  }
+  return undefined;
+}
+
 (async()=>{
-  const browser=await chromium.launch({headless:true});
+  const executablePath=resolveChromium();
+  if(executablePath) console.log(`using pre-installed Chromium at ${executablePath}`);
+  const browser=await chromium.launch(executablePath?{headless:true,executablePath}:{headless:true});
   const page=await browser.newPage({viewport:{width:1440,height:1000}});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   const checks=[];
+  const skipped=[];
   const check=(name,condition)=>{assert.ok(condition,name);checks.push(name);};
+
+  /**
+   * The Nexus loads TensorFlow.js and Chart.js from a public CDN. On a machine
+   * with no route to it those checks cannot run; report that plainly rather
+   * than failing as though the code were broken, and never as though they passed.
+   */
+  const cdnReachable=async()=>{
+    try {
+      const probe=await page.request.get('https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js',{timeout:15000});
+      return probe.ok();
+    } catch { return false; }
+  };
   try {
     await page.goto(base+'/');
     await page.screenshot({path:path.join(out,'launch-desktop.png'),fullPage:true});
@@ -98,6 +124,12 @@ const out=path.resolve('output/browser');fs.mkdirSync(out,{recursive:true});
     await page.goto('file:///'+path.resolve('worldlab.html').replaceAll('\\','/'));
     await page.waitForFunction(()=>!!window.diamondLab);await page.click('#step-button');
     check('worldlab opens directly from disk',await page.evaluate(()=>diamondLab.stepCount===1));
+    const nexusReachable=await cdnReachable();
+    if(!nexusReachable){
+      skipped.push('Nexus section skipped: no route to cdn.jsdelivr.net for TensorFlow.js and Chart.js');
+      console.warn('SKIPPED: '+skipped[skipped.length-1]);
+    }
+    if(nexusReachable){
     await page.setViewportSize({width:1440,height:1000});await page.goto(base+'/diamond-nexus.html');
     await page.waitForFunction(()=>document.body.dataset.simStatus==='ready',{},{timeout:30000});
     check('Nexus initializes with real libraries',await page.evaluate(()=>typeof tf==='object'&&typeof Chart==='function'));
@@ -114,8 +146,51 @@ const out=path.resolve('output/browser');fs.mkdirSync(out,{recursive:true});
     check('Nexus fits mobile viewport',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     await page.screenshot({path:path.join(out,'nexus-mobile-top.png')});
     await page.screenshot({path:path.join(out,'nexus-mobile.png'),fullPage:true});
+    }
+
+    // Fly Lab
+    await page.setViewportSize({width:1440,height:1000});await page.goto(base+'/fly-diamond-nexus.html');
+    await page.waitForFunction(()=>!!window.flyLab);
+    check('Fly Lab boots three agents with their own registers',await page.evaluate(()=>{
+      flyLab.advance(30);
+      const keys=Array.from(flyLab.syncytium.egoStates.keys()).sort();
+      return keys.join(',')==='agent1,agent2,agent3'&&flyLab.simStep===30;
+    }));
+    check('one environment tick per step despite three flies',await page.evaluate(()=>
+      flyLab.telemetry().tick===flyLab.simStep&&flyLab.telemetry().step===flyLab.simStep*3));
+    check('upgraded circuit mechanisms are live',await page.evaluate(()=>{
+      const t=flyLab.telemetry();
+      return t.compassMode==='attractor'&&t.mbInhibition==='apl'&&t.plasticityRule==='dan-ltd'
+        &&t.consensusMode==='gated'&&t.ringCertainty>0&&t.kcSparsity>0&&t.kcSparsity<1;
+    }));
+    check('flies hold distinct headings',await page.evaluate(()=>{
+      flyLab.advance(40);
+      const heads=['agent1','agent2','agent3'].map(k=>flyLab.syncytium.egoStates.get(k)[1].scalars.compassHeading.toFixed(5));
+      return new Set(heads).size>1;
+    }));
+    check('no move leaves the grid',await page.evaluate(()=>{
+      for(let i=0;i<120;i++) flyLab.advance(1);
+      const e=flyLab.env,g=e.gridSize;
+      return [1,2,3].every(n=>e['agent'+n+'X']>=0&&e['agent'+n+'X']<g&&e['agent'+n+'Y']>=0&&e['agent'+n+'Y']<g);
+    }));
+    check('text hook reports all three agents',await page.evaluate(()=>{
+      const state=JSON.parse(render_game_to_text());
+      return state.agents.length===3&&state.agents[2].name==='Cartographer-Scout'&&Number.isFinite(state.tick);
+    }));
+    check('Fly Lab save and load round-trips a run',await page.evaluate(()=>{
+      flyLab.advance(10);flyLab.save();
+      const before=JSON.stringify({x:flyLab.env.agent3X,y:flyLab.env.agent3Y,d:flyLab.diamonds});
+      flyLab.reset();flyLab.load();
+      return JSON.stringify({x:flyLab.env.agent3X,y:flyLab.env.agent3Y,d:flyLab.diamonds})===before;
+    }));
+    await page.screenshot({path:path.join(out,'fly-desktop.png'),fullPage:true});
+    await page.setViewportSize({width:390,height:844});
+    check('Fly Lab fits mobile viewport',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    await page.screenshot({path:path.join(out,'fly-mobile.png'),fullPage:true});
+
     check('no uncaught browser errors',errors.length===0);
-    fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({checks,errors},null,2));
-    console.log(`${checks.length} browser checks passed; screenshots and receipts: ${out}`);
+    fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify({checks,skipped,errors},null,2));
+    console.log(`${checks.length} browser checks passed${skipped.length?`, ${skipped.length} section(s) skipped`:''}; screenshots and receipts: ${out}`);
+    for(const note of skipped) console.log(`  skipped: ${note}`);
   } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

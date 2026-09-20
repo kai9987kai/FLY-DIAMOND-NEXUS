@@ -13,10 +13,15 @@ header{display:flex;align-items:center;justify-content:space-between;padding:12p
 .hlinks a{color:#38bdf8}
 
 /* Layout */
-main{display:grid;grid-template-columns:1fr 360px;gap:16px;padding:16px;max-width:1560px;margin:0 auto}
-@media(max-width:1180px){main{grid-template-columns:1fr;padding:10px}}
-.left-col{display:flex;flex-direction:column;gap:12px}
-.right-col{display:flex;flex-direction:column;gap:12px}
+/* minmax(0,...) rather than 1fr: a bare 1fr track is floored at its content's
+   min-content width, so the wrapping rows inside never got the chance to wrap
+   and the page scrolled sideways on a phone. min-width:0 does the same job for
+   the flex columns. */
+main{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px;padding:16px;max-width:1560px;margin:0 auto}
+@media(max-width:1180px){main{grid-template-columns:minmax(0,1fr);padding:10px}}
+.left-col{display:flex;flex-direction:column;gap:12px;min-width:0}
+.right-col{display:flex;flex-direction:column;gap:12px;min-width:0}
+.panel>*{min-width:0}
 
 /* Panels */
 .panel{background:#0c1528;border:1px solid #1b2a4a;border-radius:14px;padding:14px}
@@ -24,8 +29,8 @@ main{display:grid;grid-template-columns:1fr 360px;gap:16px;padding:16px;max-widt
 .panel-title .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 
 /* Canvas row */
-.canvas-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-@media(max-width:960px){.canvas-row{grid-template-columns:1fr}}
+.canvas-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+@media(max-width:960px){.canvas-row{grid-template-columns:minmax(0,1fr)}}
 canvas{display:block;border-radius:10px;width:100%;background:#040c18}
 #worldCanvas{aspect-ratio:1/1;cursor:crosshair}
 #connectomeCanvas{aspect-ratio:16/9;min-height:240px;cursor:pointer}
@@ -61,7 +66,9 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#38bdf8,#818cf
 #pretrainStatus{font-size:11px;color:#5a7aa8}
 
 /* Agent cards */
-.agents-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+/* auto-fit rather than a fixed pair of columns: there are three agents now, and
+   the row has to fold to two or one on a narrow screen. */
+.agents-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
 .agent-card{background:#091021;border:1px solid #1b2a4a;border-radius:10px;padding:10px}
 .agent-card.stasis{border-color:#f87171;box-shadow:0 0 12px #f8717166}
 .agent-name{font-size:12px;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:6px}
@@ -274,6 +281,8 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#38bdf8,#818cf
     <div class="hud-item"><span class="hud-label">Hazards</span><span class="hud-val" id="hudHazards">0</span></div>
     <div class="hud-item"><span class="hud-label">Stasis</span><span class="hud-val" id="hudStasis">0</span></div>
     <div class="hud-item"><span class="hud-label">Synergy</span><span class="hud-val" id="hudHandshakes">0</span></div>
+    <div class="hud-item"><span class="hud-label">Tri-Swarm</span><span class="hud-val" id="hudSwarm">0</span></div>
+    <div class="hud-item"><span class="hud-label">Beacons</span><span class="hud-val" id="hudBeacons">0</span></div>
     <div class="hud-divider"></div>
     <div class="hud-item"><span class="hud-label">PB Steer</span><span class="hud-val" id="hudPB">0.00</span></div>
     <div class="hud-item"><span class="hud-label">EB Stabil</span><span class="hud-val" id="hudEB">0.00</span></div>
@@ -283,7 +292,7 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#38bdf8,#818cf
     <div class="hud-item"><span class="hud-label">PDF</span><span class="hud-val" id="hudPDF">1.00x</span></div>
   </div>
 
-  <!-- Dual Agent cards -->
+  <!-- Agent cards -->
   <div class="agents-row">
     <div class="agent-card" id="agent1Card">
       <div class="agent-name">
@@ -313,6 +322,21 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#38bdf8,#818cf
         <span class="stat-label">Dwell Ticks</span><span class="stat-value" id="a2Dwell">0</span>
       </div>
       <div class="energy-bar-wrap"><div class="energy-bar" id="a2EnergyBar" style="width:100%;background:#c084fc"></div></div>
+      <div class="stasis-warn">⚠ STASIS HAZARD — MOVE!</div>
+    </div>
+    <div class="agent-card" id="agent3Card">
+      <div class="agent-name">
+        <span style="color:#38bdf8">⬢</span> Agent 3 — Cartographer-Scout
+        <span class="agent-badge badge-sentinel">Cartographer</span>
+        <span class="badge-regime SCOUT" id="a3Regime">SCOUT</span>
+      </div>
+      <div class="stat-grid">
+        <span class="stat-label">Position</span><span class="stat-value" id="a3Pos">—</span>
+        <span class="stat-label">Energy</span><span class="stat-value" id="a3Energy">100</span>
+        <span class="stat-label">Action / Latch</span><span class="stat-value" id="a3Action">—</span>
+        <span class="stat-label">Dwell Ticks</span><span class="stat-value" id="a3Dwell">0</span>
+      </div>
+      <div class="energy-bar-wrap"><div class="energy-bar" id="a3EnergyBar" style="width:100%;background:#38bdf8"></div></div>
       <div class="stasis-warn">⚠ STASIS HAZARD — MOVE!</div>
     </div>
   </div>
@@ -391,6 +415,22 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#38bdf8,#818cf
     </div>
   </div>
 
+  <!-- Circuit mechanisms -->
+  <div class="panel">
+    <div class="panel-title"><div class="dot" style="background:#facc15"></div>Circuit Mechanisms</div>
+    <div class="telem-grid">
+      <span class="tl">Compass Model</span><span class="tv" id="tmCompassMode">—</span>
+      <span class="tl">E-PG Bump Certainty</span><span class="tv" id="tmRingCert">0.00</span>
+      <span class="tl">MB Sparseness</span><span class="tv" id="tmKcSparsity">—</span>
+      <span class="tl">APL Inhibition</span><span class="tv" id="tmApl">0.00</span>
+      <span class="tl">KC→MBON Plasticity</span><span class="tv" id="tmPlasticity">—</span>
+      <span class="tl">Descending Gate</span><span class="tv" id="tmGate">—</span>
+    </div>
+    <div style="font-size:10px;color:#7a9abb;margin-top:6px" id="tmMechNote">
+      Bump certainty is the population-vector length of the E-PG ring: 1 is a sharp heading, 0 no heading at all.
+    </div>
+  </div>
+
   <!-- Premotor & AMMC -->
   <div class="panel">
     <div class="panel-title"><div class="dot" style="background:#fb7185"></div>Premotor Circuits &amp; Inter-Agent Graph</div>
@@ -414,6 +454,8 @@ progress::-webkit-progress-value{background:linear-gradient(90deg,#38bdf8,#818cf
       <span class="tl">Commissural Synapses</span><span class="tv">1024 (16×16×4)</span>
       <span class="tl">A1 Diamonds</span><span class="tv" id="tmA1D">0</span>
       <span class="tl">A2 Diamonds</span><span class="tv" id="tmA2D">0</span>
+      <span class="tl">A3 Diamonds</span><span class="tv" id="tmA3D">0</span>
+      <span class="tl">Environment Ticks</span><span class="tv" id="tmTicks">0</span>
     </div>
   </div>
 
@@ -534,6 +576,13 @@ const ENERGY_STEP    = 1;
 const ENERGY_DIAMOND = 25;
 const ENERGY_HAZARD  = 30;
 const ENERGY_MAX     = 180;
+// Appetitive and aversive sensing radii, in cells. The engine's goal gating and
+// Fan-Shaped Body vector both need a usable gradient; at the previous radius of
+// 2 on a 20x20 grid the fly was effectively blind beyond its own neighbours,
+// which made it hug walls and starve next to food it could not smell. These
+// match the benchmark arena's radii, scaled to this grid.
+const DIAMOND_SENSE  = 6;
+const HAZARD_SENSE   = 4;
 
 const BRAIN_COLORS = [
   "#38bdf8", "#34d399", "#f87171", "#c084fc", "#fbbf24",
@@ -578,11 +627,11 @@ let simTimer = null;
 let simRunning = false;
 let simStep = 0;
 let simSpeed = 200;
-let a1Diamonds = 0, a2Diamonds = 0;
+let a1Diamonds = 0, a2Diamonds = 0, a3Diamonds = 0;
 let lastResult = null;
 let showPheromones = true;
 let showTrails = true;
-let a1Trail = [], a2Trail = [];
+let a1Trail = [], a2Trail = [], a3Trail = [];
 let matrixChannel = -1; // -1: all channels mean, 0: DA, 1: OA, 2: ACh, 3: GABA
 let lastBenchmarkReport = null;
 let currentGodTool = 'inspect';
@@ -610,11 +659,13 @@ function generateWorld(seed) {
   const occupied = new Set();
   const key = (x,y)=>`${x},${y}`;
 
-  let a1x, a1y, a2x, a2y;
+  let a1x, a1y, a2x, a2y, a3x, a3y;
   do { a1x=rng.int(GRID); a1y=rng.int(GRID); } while(occupied.has(key(a1x,a1y)));
   occupied.add(key(a1x,a1y));
   do { a2x=rng.int(GRID); a2y=rng.int(GRID); } while(occupied.has(key(a2x,a2y)));
   occupied.add(key(a2x,a2y));
+  do { a3x=rng.int(GRID); a3y=rng.int(GRID); } while(occupied.has(key(a3x,a3y)));
+  occupied.add(key(a3x,a3y));
 
   while(diamonds.length < DIAMOND_COUNT) {
     const x=rng.int(GRID), y=rng.int(GRID);
@@ -626,20 +677,28 @@ function generateWorld(seed) {
   }
   return { agent1X:a1x, agent1Y:a1y, agent1Energy:INIT_ENERGY,
            agent2X:a2x, agent2Y:a2y, agent2Energy:INIT_ENERGY,
-           diamonds, hazards, diamondsCollected:0, hazardsHit:0, seed };
+           agent3X:a3x, agent3Y:a3y, agent3Energy:INIT_ENERGY,
+           diamonds, hazards, diamondsCollected:0, hazardsHit:0, seed,
+           // Lets the graft pick the best legal move instead of walking into a
+           // wall and being penalised for the stasis that follows.
+           gridSize:GRID };
 }
 
 function initSim() {
   const seed = parseInt(document.getElementById('seedInput').value,10) || 2077;
   makeSyncytium(seed);
   env = generateWorld(seed);
-  a1Diamonds = 0; a2Diamonds = 0;
+  a1Diamonds = 0; a2Diamonds = 0; a3Diamonds = 0;
   simStep = 0;
   a1Trail = [{x: env.agent1X, y: env.agent1Y}];
   a2Trail = [{x: env.agent2X, y: env.agent2Y}];
+  a3Trail = [{x: env.agent3X, y: env.agent3Y}];
   if(graft.stasisEvents !== undefined) graft.stasisEvents = 0;
   if(graft.handshakeEvents !== undefined) graft.handshakeEvents = 0;
-  logEvent(`🌍 World seeded: ${seed} (16 Fly Brains)`, 'ev-milestone');
+  if(graft.triSwarmResonanceEvents !== undefined) graft.triSwarmResonanceEvents = 0;
+  if(graft.giantFiberEvents !== undefined) graft.giantFiberEvents = 0;
+  graft.beaconWaypoints = [];
+  logEvent(`🌍 World seeded: ${seed} (16 fly brains, 3 agents)`, 'ev-milestone');
   drawWorld(); drawConnectome(); updateHUD(); updateSidebar(null);
   buildBrainMeters();
   updateInspector();
@@ -690,8 +749,8 @@ function buildSensoryObs(agentX, agentY, agentEnergy, otherX, otherY, heading = 
     if(dist < nearestHazard){ nearestHazard=dist; hazardAngle=Math.atan2(h.y-agentY,h.x-agentX); }
   }
 
-  const diamondReward = nearestDiamond < 2 ? (2-nearestDiamond)/2 : 0;
-  const hazardThreat  = nearestHazard  < 2 ? (2-nearestHazard)/2  : 0;
+  const diamondReward = nearestDiamond < DIAMOND_SENSE ? (DIAMOND_SENSE-nearestDiamond)/DIAMOND_SENSE : 0;
+  const hazardThreat  = nearestHazard  < HAZARD_SENSE  ? (HAZARD_SENSE-nearestHazard)/HAZARD_SENSE   : 0;
   const opticFlowX = (otherX - agentX) / GRID;
   const opticFlowY = (otherY - agentY) / GRID;
 
@@ -722,6 +781,8 @@ function applyAction(agentKey, actionIndex) {
 }
 
 function checkInteractions(agentKey, agentLabel, addDiamond) {
+  // agentKey doubles as the ego id, so reinforcement lands on the synapses that
+  // actually drove this fly's action rather than whichever fly stepped last.
   const ax = env[agentKey+'X'], ay = env[agentKey+'Y'];
   const eKey = agentKey+'Energy';
   env[eKey] = Math.max(0, env[eKey] - ENERGY_STEP);
@@ -733,7 +794,7 @@ function checkInteractions(agentKey, agentLabel, addDiamond) {
       env.diamondsCollected++;
       addDiamond();
       logEvent(`💎 ${agentLabel} collected diamond (+${ENERGY_DIAMOND})`, 'ev-reward');
-      graft.feedback(5, false, {x:ax/GRID, y:ay/GRID});
+      graft.feedback(5, false, {x:ax/GRID, y:ay/GRID}, agentKey);
       break;
     }
   }
@@ -742,7 +803,7 @@ function checkInteractions(agentKey, agentLabel, addDiamond) {
       env[eKey] = Math.max(0, env[eKey]-ENERGY_HAZARD);
       env.hazardsHit++;
       logEvent(`⚡ ${agentLabel} hit hazard (-${ENERGY_HAZARD})`, 'ev-hazard');
-      graft.feedback(-3, true, {x:ax/GRID, y:ay/GRID});
+      graft.feedback(-3, true, {x:ax/GRID, y:ay/GRID}, agentKey);
       break;
     }
   }
@@ -751,6 +812,7 @@ function checkInteractions(agentKey, agentLabel, addDiamond) {
     const rng = new MulberryPRNG(env.seed + simStep);
     const occupied = new Set([
       `${env.agent1X},${env.agent1Y}`,`${env.agent2X},${env.agent2Y}`,
+      `${env.agent3X},${env.agent3Y}`,
       ...env.hazards.map(h=>`${h.x},${h.y}`)
     ]);
     while(env.diamonds.length < DIAMOND_COUNT) {
@@ -769,35 +831,55 @@ function step() {
   for(const h of env.hazards) chemGrid.emit("threatOdor", h.x, h.y, 0.4);
   chemGrid.emit("foragerTrail", env.agent1X, env.agent1Y, 0.6);
   chemGrid.emit("sentinelTrail", env.agent2X, env.agent2Y, 0.6);
+  chemGrid.emit("customPheromone", env.agent3X, env.agent3Y, 0.35);
   chemGrid.step(0.18, 0.94);
 
   // 2. Build sensory observations with bilateral antennae
   const obs1 = buildSensoryObs(env.agent1X, env.agent1Y, env.agent1Energy, env.agent2X, env.agent2Y, graft.agent1.lastHeading);
   const obs2 = buildSensoryObs(env.agent2X, env.agent2Y, env.agent2Energy, env.agent1X, env.agent1Y, graft.agent2.lastHeading);
+  const obs3 = buildSensoryObs(env.agent3X, env.agent3Y, env.agent3Energy, env.agent1X, env.agent1Y, graft.agent3.lastHeading);
 
-  lastResult = graft.resolveAgents(env, obs1, obs2);
+  const beaconsBefore = graft.beaconWaypoints.length;
+  lastResult = graft.resolveAgents(env, obs1, obs2, obs3);
 
   // 3. Apply movements
   applyAction('agent1', lastResult.agent1.actionIndex);
   applyAction('agent2', lastResult.agent2.actionIndex);
+  if(lastResult.agent3) applyAction('agent3', lastResult.agent3.actionIndex);
 
   if(lastResult.agent1.isStasis)
     logEvent(`🔥 Agent1 Harvester STASIS (dwell=${graft.agent1.dwellTicks})`, 'ev-stasis');
   if(lastResult.agent2.isStasis)
     logEvent(`🔥 Agent2 Sentinel STASIS (dwell=${graft.agent2.dwellTicks})`, 'ev-stasis');
+  if(lastResult.agent3 && lastResult.agent3.isStasis)
+    logEvent(`🔥 Agent3 Cartographer STASIS (dwell=${graft.agent3.dwellTicks})`, 'ev-stasis');
 
-  if(lastResult.isAcousticHandshake) {
-    logEvent(`🎶 AMMC Acoustic Handshake: +2 Energy Resonance (+Octopamine surge)`, 'ev-synergy');
+  for(const [label, state] of [['Harvester', lastResult.agent1], ['Sentinel', lastResult.agent2], ['Cartographer', lastResult.agent3]]) {
+    if(state && state.isGFEscape) logEvent(`⚡ ${label} giant-fibre escape saccade`, 'ev-hazard');
   }
 
-  checkInteractions('agent1', 'Harvester', ()=>{ a1Diamonds++; });
-  checkInteractions('agent2', 'Sentinel',  ()=>{ a2Diamonds++; });
+  if(lastResult.isAcousticHandshake) {
+    logEvent(`🎶 AMMC acoustic handshake (+${graft.handshakeEnergy} energy each, then refractory)`, 'ev-synergy');
+  }
+  if(lastResult.isTriSwarmResonance) {
+    logEvent(`🔺 Tri-swarm resonance: three agents within 4 cells (+${graft.triSwarmEnergy} energy each)`, 'ev-synergy');
+  }
+  if(graft.beaconWaypoints.length > beaconsBefore) {
+    const beacon = graft.beaconWaypoints[graft.beaconWaypoints.length - 1];
+    logEvent(`📍 Cartographer planted beacon at (${beacon.x},${beacon.y})`, 'ev-milestone');
+  }
+
+  checkInteractions('agent1', 'Harvester',    ()=>{ a1Diamonds++; });
+  checkInteractions('agent2', 'Sentinel',     ()=>{ a2Diamonds++; });
+  checkInteractions('agent3', 'Cartographer', ()=>{ a3Diamonds++; });
 
   // 4. Record odometry trail breadcrumbs
   a1Trail.push({x: env.agent1X, y: env.agent1Y});
   if(a1Trail.length > 24) a1Trail.shift();
   a2Trail.push({x: env.agent2X, y: env.agent2Y});
   if(a2Trail.length > 24) a2Trail.shift();
+  a3Trail.push({x: env.agent3X, y: env.agent3Y});
+  if(a3Trail.length > 24) a3Trail.shift();
 
   drawWorld();
   drawConnectome();
@@ -914,47 +996,9 @@ function drawWorld() {
 
   // Odometry Trajectory Breadcrumbs & Home Vector (Brain 13 NO)
   if(showTrails) {
-    // Agent 1 Harvester Trail (Cyan)
-    if(a1Trail.length > 1) {
-      worldCtx.save();
-      for(let i=0; i<a1Trail.length-1; i++) {
-        const alpha = ((i + 1) / a1Trail.length) * 0.45;
-        const p1 = a1Trail[i], p2 = a1Trail[i+1];
-        worldCtx.strokeStyle = `rgba(52, 211, 153, ${alpha})`;
-        worldCtx.lineWidth = 2.0;
-        worldCtx.beginPath();
-        worldCtx.moveTo(p1.x * cw + cw / 2, p1.y * ch + ch / 2);
-        worldCtx.lineTo(p2.x * cw + cw / 2, p2.y * ch + ch / 2);
-        worldCtx.stroke();
-
-        worldCtx.fillStyle = `rgba(52, 211, 153, ${alpha * 0.7})`;
-        worldCtx.beginPath();
-        worldCtx.arc(p1.x * cw + cw / 2, p1.y * ch + ch / 2, 2, 0, Math.PI * 2);
-        worldCtx.fill();
-      }
-      worldCtx.restore();
-    }
-
-    // Agent 2 Sentinel Trail (Purple)
-    if(a2Trail.length > 1) {
-      worldCtx.save();
-      for(let i=0; i<a2Trail.length-1; i++) {
-        const alpha = ((i + 1) / a2Trail.length) * 0.45;
-        const p1 = a2Trail[i], p2 = a2Trail[i+1];
-        worldCtx.strokeStyle = `rgba(192, 132, 252, ${alpha})`;
-        worldCtx.lineWidth = 2.0;
-        worldCtx.beginPath();
-        worldCtx.moveTo(p1.x * cw + cw / 2, p1.y * ch + ch / 2);
-        worldCtx.lineTo(p2.x * cw + cw / 2, p2.y * ch + ch / 2);
-        worldCtx.stroke();
-
-        worldCtx.fillStyle = `rgba(192, 132, 252, ${alpha * 0.7})`;
-        worldCtx.beginPath();
-        worldCtx.arc(p1.x * cw + cw / 2, p1.y * ch + ch / 2, 2, 0, Math.PI * 2);
-        worldCtx.fill();
-      }
-      worldCtx.restore();
-    }
+    drawTrail(a1Trail, '52, 211, 153', cw, ch);   // Harvester
+    drawTrail(a2Trail, '192, 132, 252', cw, ch);  // Sentinel-Pioneer
+    drawTrail(a3Trail, '56, 189, 248', cw, ch);   // Cartographer-Scout
 
     // Brain 13 Noduli (NO) Home Vector Overlay
     if(syncytium && syncytium.brains[13]) {
@@ -998,17 +1042,58 @@ function drawWorld() {
     }
   }
 
-  // Inter-agent communication laser
+  // Cartographer beacon waypoints
+  if(graft && graft.beaconWaypoints) {
+    worldCtx.save();
+    for(const beacon of graft.beaconWaypoints) {
+      const bx = beacon.x*cw+cw/2, by = beacon.y*ch+ch/2;
+      worldCtx.strokeStyle = '#38bdf899';
+      worldCtx.lineWidth = 1.2;
+      worldCtx.beginPath(); worldCtx.arc(bx, by, 9, 0, Math.PI*2); worldCtx.stroke();
+      worldCtx.fillStyle = '#38bdf8';
+      worldCtx.beginPath();
+      worldCtx.moveTo(bx, by-4); worldCtx.lineTo(bx+3.5, by+3); worldCtx.lineTo(bx-3.5, by+3);
+      worldCtx.closePath(); worldCtx.fill();
+    }
+    worldCtx.restore();
+  }
+
+  // Inter-agent communication mesh
   const a1cx = env.agent1X*cw+cw/2, a1cy = env.agent1Y*ch+ch/2;
   const a2cx = env.agent2X*cw+cw/2, a2cy = env.agent2Y*ch+ch/2;
-  const grad = worldCtx.createLinearGradient(a1cx,a1cy,a2cx,a2cy);
-  grad.addColorStop(0,'#34d39966'); grad.addColorStop(1,'#a855f766');
-  worldCtx.beginPath(); worldCtx.moveTo(a1cx,a1cy); worldCtx.lineTo(a2cx,a2cy);
-  worldCtx.strokeStyle=grad; worldCtx.lineWidth=2; worldCtx.setLineDash([4,4]); worldCtx.stroke();
-  worldCtx.setLineDash([]);
+  const a3cx = env.agent3X*cw+cw/2, a3cy = env.agent3Y*ch+ch/2;
+  const links = [
+    [a1cx, a1cy, a2cx, a2cy, '#34d39966', '#a855f766'],
+    [a2cx, a2cy, a3cx, a3cy, '#a855f766', '#38bdf866'],
+    [a3cx, a3cy, a1cx, a1cy, '#38bdf866', '#34d39966']
+  ];
+  worldCtx.save();
+  worldCtx.setLineDash([4,4]);
+  worldCtx.lineWidth = 2;
+  for(const [x1,y1,x2,y2,c1,c2] of links) {
+    const grad = worldCtx.createLinearGradient(x1,y1,x2,y2);
+    grad.addColorStop(0,c1); grad.addColorStop(1,c2);
+    worldCtx.beginPath(); worldCtx.moveTo(x1,y1); worldCtx.lineTo(x2,y2);
+    worldCtx.strokeStyle=grad; worldCtx.stroke();
+  }
+  worldCtx.restore();
+
+  // Tri-swarm resonance: the whole triangle lights up
+  if(lastResult && (lastResult.isTriSwarmResonance || lastResult.isTriSwarmInRange)) {
+    worldCtx.save();
+    worldCtx.beginPath();
+    worldCtx.moveTo(a1cx,a1cy); worldCtx.lineTo(a2cx,a2cy); worldCtx.lineTo(a3cx,a3cy);
+    worldCtx.closePath();
+    worldCtx.fillStyle = 'rgba(56, 189, 248, 0.10)';
+    worldCtx.fill();
+    worldCtx.strokeStyle = 'rgba(56, 189, 248, 0.55)';
+    worldCtx.lineWidth = 1.5;
+    worldCtx.stroke();
+    worldCtx.restore();
+  }
 
   // AMMC Acoustic Handshake Wave Rings
-  if(lastResult && lastResult.isAcousticHandshake) {
+  if(lastResult && (lastResult.isAcousticHandshake || lastResult.isHandshakeInRange)) {
     const midX = (a1cx + a2cx) / 2;
     const midY = (a1cy + a2cy) / 2;
     const pulse = (Date.now() % 800) / 800;
@@ -1027,6 +1112,30 @@ function drawWorld() {
 
   drawAgent(worldCtx, env.agent2X, env.agent2Y, cw, ch, '#c084fc',
     graft.agent2.isStasisHazard, graft.agent2.behavioralRegime, graft.agent2.lastHeading);
+
+  drawAgent(worldCtx, env.agent3X, env.agent3Y, cw, ch, '#38bdf8',
+    graft.agent3.isStasisHazard, graft.agent3.behavioralRegime, graft.agent3.lastHeading);
+}
+
+function drawTrail(trail, rgb, cw, ch) {
+  if(!trail || trail.length < 2) return;
+  worldCtx.save();
+  for(let i=0; i<trail.length-1; i++) {
+    const alpha = ((i + 1) / trail.length) * 0.45;
+    const p1 = trail[i], p2 = trail[i+1];
+    worldCtx.strokeStyle = `rgba(${rgb}, ${alpha})`;
+    worldCtx.lineWidth = 2.0;
+    worldCtx.beginPath();
+    worldCtx.moveTo(p1.x * cw + cw / 2, p1.y * ch + ch / 2);
+    worldCtx.lineTo(p2.x * cw + cw / 2, p2.y * ch + ch / 2);
+    worldCtx.stroke();
+
+    worldCtx.fillStyle = `rgba(${rgb}, ${alpha * 0.7})`;
+    worldCtx.beginPath();
+    worldCtx.arc(p1.x * cw + cw / 2, p1.y * ch + ch / 2, 2, 0, Math.PI * 2);
+    worldCtx.fill();
+  }
+  worldCtx.restore();
 }
 
 function drawAgent(ctx, gx, gy, cw, ch, color, isStasis, regime, heading = 0) {
@@ -1351,6 +1460,8 @@ function updateHUD() {
   document.getElementById('hudHazards').textContent=env.hazardsHit||0;
   document.getElementById('hudStasis').textContent=graft?graft.stasisEvents:0;
   document.getElementById('hudHandshakes').textContent=graft?graft.handshakeEvents:0;
+  document.getElementById('hudSwarm').textContent=graft?(graft.triSwarmResonanceEvents||0):0;
+  document.getElementById('hudBeacons').textContent=graft?(graft.beaconWaypoints?graft.beaconWaypoints.length:0):0;
   if(syncytium) {
     const tel=syncytium.getTelemetry();
     document.getElementById('hudPB').textContent=(tel.pbPhaseShift || 0).toFixed(2);
@@ -1408,20 +1519,63 @@ function updateSidebar(result) {
   document.getElementById('tmPretrained').textContent=tel.isPretrained?'Yes':'No';
   document.getElementById('tmA1D').textContent=a1Diamonds;
   document.getElementById('tmA2D').textContent=a2Diamonds;
+  document.getElementById('tmA3D').textContent=a3Diamonds;
+  document.getElementById('tmTicks').textContent=tel.tick||0;
+
+  // Circuit mechanisms
+  document.getElementById('tmCompassMode').textContent =
+    tel.compassMode === 'attractor' ? 'E-PG ring attractor' : 'kinematic (legacy)';
+  document.getElementById('tmRingCert').textContent=(tel.ringCertainty||0).toFixed(2);
+  document.getElementById('tmKcSparsity').textContent=(tel.kcSparsity*100||0).toFixed(1)+'% active';
+  document.getElementById('tmApl').textContent=(tel.aplActivity||0).toFixed(2);
+  document.getElementById('tmPlasticity').textContent =
+    tel.plasticityRule === 'dan-ltd' ? 'dopamine-gated LTD' : 'Hebbian (legacy)';
+  document.getElementById('tmGate').textContent=describeDescendingGate(tel);
 
   // Agent cards
   updateAgentCard('agent1',env.agent1X,env.agent1Y,env.agent1Energy,
     graft.agent1, result?result.agent1:null, 'a1');
   updateAgentCard('agent2',env.agent2X,env.agent2Y,env.agent2Energy,
     graft.agent2, result?result.agent2:null, 'a2');
+  updateAgentCard('agent3',env.agent3X,env.agent3Y,env.agent3Energy,
+    graft.agent3, result?result.agent3:null, 'a3');
 
   if(result) {
     const peerInfo = document.getElementById('peerInfo');
-    const synergyStatus = result.isAcousticHandshake ? ' [🎶 RESONANCE HANDSHAKE]' : '';
-    peerInfo.textContent=`Peer Δ: ${result.peerDist.toFixed(1)} cells | AMMC: ${tel.ammcVibration.toFixed(2)}${synergyStatus}`;
+    const synergyStatus = result.isAcousticHandshake ? ' [🎶 HANDSHAKE]'
+      : result.isHandshakeInRange ? ' [🎶 paired, refractory]' : '';
+    const swarmStatus = result.isTriSwarmResonance ? ' [🔺 TRI-SWARM]'
+      : result.isTriSwarmInRange ? ' [🔺 clustered, refractory]' : '';
+    const d23 = result.dist23 !== undefined && result.dist23 < 900 ? result.dist23.toFixed(1) : '—';
+    const d31 = result.dist31 !== undefined && result.dist31 < 900 ? result.dist31.toFixed(1) : '—';
+    peerInfo.textContent=`Δ 1–2 ${result.peerDist.toFixed(1)} · 2–3 ${d23} · 3–1 ${d31} cells | AMMC ${tel.ammcVibration.toFixed(2)}${synergyStatus}${swarmStatus}`;
   }
 
   updateBrainMeters();
+}
+
+/**
+ * Names which group of neuropils currently holds the descending vote, by
+ * finding the group whose share grew most against its flat baseline.
+ */
+function describeDescendingGate(tel) {
+  if(tel.consensusMode !== 'gated') return 'flat (legacy)';
+  // Gains only exist once a fly has stepped. Reporting "flat (legacy)" here
+  // would name the wrong mechanism rather than admit there is nothing to show.
+  if(!tel.descendingGains) return 'gated (awaiting first tick)';
+  const groups = FlyBrainEngine.DESCENDING_GROUPS;
+  const totals = {};
+  for(let i=0; i<tel.descendingGains.length; i++) {
+    const group = groups[tel.brainRoles[i]] || 'support';
+    totals[group] = (totals[group] || 0) + tel.descendingGains[i];
+  }
+  let leader = 'support', best = -Infinity;
+  for(const group of Object.keys(totals)) {
+    if(group === 'support') continue;
+    if(totals[group] > best) { best = totals[group]; leader = group; }
+  }
+  const labels = { reflex: 'escape reflex', goal: 'goal-directed', explore: 'exploration' };
+  return labels[leader] || leader;
 }
 
 function updateAgentCard(cardId, gx, gy, energy, agentData, actionResult, pfx) {
@@ -1445,7 +1599,8 @@ function updateAgentCard(cardId, gx, gy, energy, agentData, actionResult, pfx) {
   const pct=Math.max(0,Math.min(100,(energy/ENERGY_MAX)*100));
   const bar=document.getElementById(pfx+'EnergyBar');
   bar.style.width=pct+'%';
-  bar.style.background=energy<40?'#f87171':energy<80?'#fbbf24':pfx==='a1'?'#34d399':'#c084fc';
+  const healthy = { a1:'#34d399', a2:'#c084fc', a3:'#38bdf8' }[pfx] || '#34d399';
+  bar.style.background=energy<40?'#f87171':energy<80?'#fbbf24':healthy;
 }
 
 // ─────────────── Event Log ───────────────
@@ -1500,18 +1655,23 @@ function saveState(silent=false) {
     const json=FlyBrainStateSerializer.serialize(graft,{
       worldSeed:env.seed, agent1X:env.agent1X, agent1Y:env.agent1Y,
       agent2X:env.agent2X, agent2Y:env.agent2Y,
+      agent3X:env.agent3X, agent3Y:env.agent3Y,
       agent1Energy:env.agent1Energy, agent2Energy:env.agent2Energy,
+      agent3Energy:env.agent3Energy,
       diamonds:env.diamonds, hazards:env.hazards,
       diamondsCollected:env.diamondsCollected, hazardsHit:env.hazardsHit,
-      simStep, a1Diamonds, a2Diamonds
+      trails:{ a1:a1Trail, a2:a2Trail, a3:a3Trail },
+      simStep, a1Diamonds, a2Diamonds, a3Diamonds
     });
     localStorage.setItem(FlyBrainStateSerializer.STORAGE_KEY, json);
-    if(!silent) logEvent('💾 State v5 saved to localStorage', 'ev-milestone');
+    if(!silent) logEvent('💾 State v7 saved to localStorage', 'ev-milestone');
   } catch(e){ console.error('Save failed',e); }
 }
 
 function loadState() {
-  const json=FlyBrainStateSerializer.loadFromLocalStorage(graft);
+  // The raw document, not loadFromLocalStorage's return value: that is the
+  // extra payload, and feeding it back into the restore path fails.
+  const json=FlyBrainStateSerializer.readRawFromLocalStorage();
   if(!json){ logEvent('No saved state found','ev-hazard'); return; }
   _restoreFromJson(json);
 }
@@ -1549,6 +1709,7 @@ function _restoreFromJson(json) {
     const ex=parsed.extraAgentData||{};
     if(ex.agent1X!==undefined){ env.agent1X=ex.agent1X; env.agent1Y=ex.agent1Y; env.agent1Energy=ex.agent1Energy||INIT_ENERGY; }
     if(ex.agent2X!==undefined){ env.agent2X=ex.agent2X; env.agent2Y=ex.agent2Y; env.agent2Energy=ex.agent2Energy||INIT_ENERGY; }
+    if(ex.agent3X!==undefined){ env.agent3X=ex.agent3X; env.agent3Y=ex.agent3Y; env.agent3Energy=ex.agent3Energy||INIT_ENERGY; }
     if(ex.diamonds) env.diamonds=ex.diamonds;
     if(ex.hazards) env.hazards=ex.hazards;
     if(ex.diamondsCollected) env.diamondsCollected=ex.diamondsCollected;
@@ -1556,6 +1717,12 @@ function _restoreFromJson(json) {
     if(ex.simStep) simStep=ex.simStep;
     if(ex.a1Diamonds) a1Diamonds=ex.a1Diamonds;
     if(ex.a2Diamonds) a2Diamonds=ex.a2Diamonds;
+    if(ex.a3Diamonds) a3Diamonds=ex.a3Diamonds;
+    // Trails are display history; a save without them starts fresh from the
+    // restored positions rather than showing another run's path.
+    a1Trail = ex.trails?.a1 || [{x: env.agent1X, y: env.agent1Y}];
+    a2Trail = ex.trails?.a2 || [{x: env.agent2X, y: env.agent2Y}];
+    a3Trail = ex.trails?.a3 || [{x: env.agent3X, y: env.agent3Y}];
 
     if(syncytium.isPretrained) document.getElementById('pretrainedBadge').style.display='';
     drawWorld(); drawConnectome(); updateHUD(); updateSidebar(null); updateInspector();
@@ -1814,10 +1981,57 @@ document.getElementById('speedSlider').addEventListener('input', e=>{
   if(simRunning){ clearTimeout(simTimer); scheduleStep(); }
 });
 
+// ─────────────── Browser QA hook ───────────────
+// Mirrors window.diamondLab in the World Lab so the browser suite can drive
+// this app without depending on the wall-clock timer. Top-level let bindings
+// are not window properties, so they are exposed explicitly.
+window.flyLab = {
+  get env() { return env; },
+  get graft() { return graft; },
+  get syncytium() { return syncytium; },
+  get chemGrid() { return chemGrid; },
+  get running() { return simRunning; },
+  get simStep() { return simStep; },
+  get lastResult() { return lastResult; },
+  get diamonds() { return { agent1: a1Diamonds, agent2: a2Diamonds, agent3: a3Diamonds }; },
+  get trails() { return { agent1: a1Trail, agent2: a2Trail, agent3: a3Trail }; },
+  telemetry() { return syncytium.getTelemetry(); },
+  /** Run n logical ticks immediately, independent of the playback timer. */
+  advance(ticks = 1) { pauseSim(); for (let i = 0; i < ticks; i++) step(); return simStep; },
+  reset: resetSim,
+  save: () => saveState(true),
+  load: loadState,
+  serialize: () => FlyBrainStateSerializer.serialize(graft, { worldSeed: env.seed })
+};
+
+/** Compact text state, matching the World Lab's hook of the same name. */
+window.render_game_to_text = function () {
+  const tel = syncytium.getTelemetry();
+  return JSON.stringify({
+    step: simStep,
+    tick: tel.tick,
+    seed: env.seed,
+    compassMode: tel.compassMode,
+    ringCertainty: Number(tel.ringCertainty.toFixed(4)),
+    kcSparsity: Number(tel.kcSparsity.toFixed(4)),
+    consensusMode: tel.consensusMode,
+    agents: [
+      { name: 'Harvester', x: env.agent1X, y: env.agent1Y, energy: env.agent1Energy, regime: graft.agent1.behavioralRegime, diamonds: a1Diamonds },
+      { name: 'Sentinel-Pioneer', x: env.agent2X, y: env.agent2Y, energy: env.agent2Energy, regime: graft.agent2.behavioralRegime, diamonds: a2Diamonds },
+      { name: 'Cartographer-Scout', x: env.agent3X, y: env.agent3Y, energy: env.agent3Energy, regime: graft.agent3.behavioralRegime, diamonds: a3Diamonds }
+    ],
+    beacons: graft.beaconWaypoints.length,
+    diamondsCollected: env.diamondsCollected,
+    hazardsHit: env.hazardsHit,
+    stasisEvents: graft.stasisEvents,
+    handshakes: graft.handshakeEvents,
+    triSwarm: graft.triSwarmResonanceEvents
+  });
+};
+
 // ─────────────── Boot ───────────────
 initSim();
-const _autoSaved = localStorage.getItem(FlyBrainStateSerializer.STORAGE_KEY) ||
-                   localStorage.getItem("diamond_sim_fly_brain_state_v4");
+const _autoSaved = FlyBrainStateSerializer.readRawFromLocalStorage();
 if(_autoSaved) {
   try {
     const _p=JSON.parse(_autoSaved);

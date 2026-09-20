@@ -1,0 +1,6 @@
+# Runtime artifacts: screenshots, receipts and benchmark output.
+# Recorded evidence that is meant to be kept lives in docs/benchmarks/.
+output/
+
+# Optional browser-test dependency.
+node_modules/

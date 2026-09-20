@@ -1,0 +1,4 @@
+# Every tracked file in this project is stored with CRLF endings. Without this,
+# a checkout on a machine configured to normalize them rewrites whole files and
+# turns a one-line change into a whole-file diff.
+* -text
