@@ -21,8 +21,26 @@ Validation: Node regression tests, paired-seed raw evidence, browser controls an
 - Final frozen-original comparison: 20 identical initial-state seed pairs, 300 steps, 2 agents. Reward/agent 149.5952 vs 145.4488; paired delta +4.1464, 95% interval [0.7665, 7.5405]. Coverage 15.7472% vs 8.3486%; respawns/run 1.05 vs 3.05; hazards equal 0.15. Receipt hashes verified against current core/experiment/comparison sources.
 - Evidence and reproducible commands are in docs/validation.md; raw original comparison is tracked under docs/benchmarks/. Runtime/browser artifacts remain ignored under output/.
 
+## Fly Lab work (this branch)
+
+Prompt: "innovate improve refine add features make it better and look at the best and new research to help and make it better in every way".
+
+Research reviewed: Shiu et al., *A Drosophila computational brain model reveals sensorimotor processing* (Nature 2024); the male CNS connectome (Janelia FlyEM / MRC LMB, 2025), whose upstream R package is bundled here as `malecns/`; connectome-constrained ring attractor work (bioRxiv 2024, NeurIPS 2025); Lin et al. on APL-driven Kenyon-cell sparseness (2014) and localised mushroom-body inhibition (2020); reinforcement-prediction-error models of mushroom-body learning (2021); rliable evaluation methodology.
+
+- The Fly Lab appeared in no documentation: not the README, not the research mapping, not the validation record. It is the largest component in the repository.
+- Fixed four reproducibility defects: neurogenesis drew from `Math.random`, neuron ids and engrams carried wall-clock stamps, and snapshot restore set a generator's draw count but never its state.
+- The circadian clock, day/night phase and homeostatic schedule advanced once per fly rather than once per tick, so a three-fly swarm ran its day three times too fast.
+- All agents shared one set of brain registers: heading, odometry, gait phase, looming history and metabolic titres bled between individuals, and reinforcement trained whichever fly had stepped last. Learned synapses stay shared; per-individual registers are now swapped per fly.
+- Replaced three circuits that carried a fly structure's name without its mechanism (compass, mushroom-body sparseness, KC→MBON plasticity) and added state-dependent descending gating. Each keeps its predecessor selectable as `"legacy"`.
+- Added `src/fly-lif-circuit.js`, a spiking module using the published whole-brain leaky integrate-and-fire parameters.
+- Added paired bootstrap intervals, probability of improvement, an interquartile mean and tie-split win shares to the connectome benchmark, plus a reproducible CLI with source hashes.
+- Wired the third agent into the app; the engine had supported it all along. Driving the app then exposed five further defects, including heading derived from bearing rather than travel, moves that walked into walls, a social bonus that out-earned foraging, and a Load State button that never worked.
+- Measured: upgraded versus legacy syncytium, +95.85 net score over 20 seeds, 95% interval [+47.99, +152.65]. Reported alongside two results that do not flatter the change: a single-brain arm still scores higher, and the spiking arm is inconclusive.
+- 138 Node tests (1 skipped offline), 38 browser checks, JavaScript/HTML checks pass.
+
 ## Remaining scope limits
 
-- Completed this improvement set without committing or pushing. Existing branch remains main.
+- Completed the earlier improvement set without committing or pushing. Existing branch remains main.
+- Fly Lab limits: one reduced 16x16 arena and one convenience seed set, not a held-out benchmark. A single Antennal Lobe brain still outscores all sixteen there; gating closed most of that gap but not all of it. The spiking circuit has no plasticity and is not used by the interactive app. No connectome data is read at runtime; the 16x16x4 commissures are synthetic.
 - No universal superiority or speedup claim: the full-version benchmark covers one fixed configuration, and its timing uses different execution contexts. Preliminary within-core beam-vs-shooting comparison is inconclusive.
 - World Lab v2 snapshots lack RNG state and are rejected for exact replay. Nexus checkpoints remain explicitly partial. Larger neural world models, faithful paper implementations, representative held-out multi-task evaluation and long-horizon performance work are future projects.
