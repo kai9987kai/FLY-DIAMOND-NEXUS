@@ -532,3 +532,74 @@ test("a legacy snapshot resumes on the legacy circuit", () => {
   assert.equal(restored.syncytium.brains[1].config.mbInhibition, "topk");
   assert.equal(LEGACY_CONFIG.plasticity, "hebbian");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// State-dependent descending gating
+// ─────────────────────────────────────────────────────────────────────────────
+const { DESCENDING_GROUPS } = FlyBrainEngine;
+
+function gainsFor(sensory) {
+  const syncytium = new SixteenFlyBrainSyncytium(9);
+  syncytium.step(sensory, 0, 0, 100);
+  const byGroup = {};
+  const gains = syncytium.lastDescendingGains;
+  assert.ok(gains, "gated consensus must publish its gains");
+  for (let i = 0; i < syncytium.brainCount; i++) {
+    const group = DESCENDING_GROUPS[syncytium.brains[i].role] || "support";
+    byGroup[group] = (byGroup[group] || 0) + gains[i];
+  }
+  return byGroup;
+}
+
+test("a looming threat hands the motor vote to the escape circuits", () => {
+  const calm = gainsFor(OBS(0.5, 0.5, 0.9, 0.0));
+  const threatened = gainsFor(OBS(0.5, 0.5, 0.9, 0.95));
+  assert.ok(
+    threatened.reflex > calm.reflex,
+    "threat must raise the reflex group's share of the descending vote"
+  );
+  assert.ok(threatened.explore < calm.explore, "exploration must yield during an escape");
+});
+
+test("an appetitive gradient hands it to the goal-directed circuits", () => {
+  const noGradient = new Array(14).fill(0);
+  noGradient[4] = 1.0;
+  noGradient[0] = 0.5;
+  noGradient[1] = 0.5;
+  const gradient = noGradient.slice();
+  gradient[2] = 0.9;
+
+  const idle = gainsFor(noGradient);
+  const pursuing = gainsFor(gradient);
+  assert.ok(pursuing.goal > idle.goal, "a scent must raise the goal group's share");
+  assert.ok(pursuing.explore < idle.explore, "and lower exploration's");
+});
+
+test("hunger makes a fly act on a gradient a sated fly would ignore", () => {
+  const weak = index => {
+    const obs = new Array(14).fill(0);
+    obs[0] = 0.5;
+    obs[1] = 0.5;
+    obs[2] = 0.18;
+    obs[4] = index;
+    return gainsFor(obs);
+  };
+  assert.ok(weak(0.12).goal > weak(1.2).goal, "hunger must amplify goal pursuit at the same scent");
+});
+
+test("gating redistributes the descending vote without changing its total", () => {
+  const total = groups => Object.values(groups).reduce((a, b) => a + b, 0);
+  const calm = total(gainsFor(OBS(0.5, 0.5, 0.9, 0.0)));
+  const threatened = total(gainsFor(OBS(0.5, 0.5, 0.2, 0.95)));
+  assert.ok(
+    Math.abs(calm - threatened) < 1e-3,
+    `total descending weight must be conserved, saw ${calm} vs ${threatened}`
+  );
+});
+
+test("the legacy flat consensus publishes no gains", () => {
+  const legacy = new SixteenFlyBrainSyncytium(9, "legacy");
+  legacy.step(OBS(0.5, 0.5), 0, 0, 100);
+  assert.equal(legacy.lastDescendingGains, null);
+  assert.equal(legacy.config.consensus, "flat");
+});

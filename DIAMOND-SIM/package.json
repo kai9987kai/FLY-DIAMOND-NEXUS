@@ -9,7 +9,8 @@
     "benchmark": "node scripts/benchmark.cjs",
     "benchmark:original": "node scripts/compare-original.cjs",
     "test:browser": "node scripts/browser-check.cjs",
-    "serve": "node scripts/serve.cjs"
+    "serve": "node scripts/serve.cjs",
+    "benchmark:connectome": "node scripts/connectome-benchmark.cjs"
   },
   "engines": {
     "node": ">=20"

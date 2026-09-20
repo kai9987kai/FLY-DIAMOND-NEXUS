@@ -594,7 +594,7 @@ test("ConnectomeBenchmarkRunner runs episodes deterministically and computes pai
 // ──────────────────────────────────────────────────────────────────────────────
 // 26. Connectome Benchmark — Comparative 4-Arm Evaluation
 // ──────────────────────────────────────────────────────────────────────────────
-test("ConnectomeBenchmarkRunner evaluates 4 policy arms with complete paired statistics", async () => {
+test("ConnectomeBenchmarkRunner evaluates every default arm with complete paired statistics", async () => {
   const { ConnectomeBenchmarkRunner } = require("../src/connectome-benchmark.js");
   const runner = new ConnectomeBenchmarkRunner();
 
@@ -604,12 +604,11 @@ test("ConnectomeBenchmarkRunner evaluates 4 policy arms with complete paired sta
     seeds: [101, 202, 303]
   });
 
-  assert.equal(result.arms.length, 4);
-  const armNames = result.arms.map(a => a.arm);
-  assert.deepEqual(armNames, [
+  assert.deepEqual(result.arms.map(a => a.arm), [
     "RandomWalk",
     "SingleBrain_AL",
     "CentralComplex_8B",
+    "Syncytium_16B_Legacy",
     "Syncytium_16B"
   ]);
 
@@ -618,7 +617,11 @@ test("ConnectomeBenchmarkRunner evaluates 4 policy arms with complete paired sta
     assert.ok(Number.isFinite(arm.meanNetScore));
     assert.ok(Number.isFinite(arm.meanDiamonds));
     assert.ok(Number.isFinite(arm.winRate));
+    assert.ok(Number.isFinite(arm.iqmNetScore));
   }
+
+  assert.equal(result.reference, "RandomWalk");
+  assert.equal(result.comparisons.length, result.arms.length - 1);
 });
 
 // ──────────────────────────────────────────────────────────────────────────────

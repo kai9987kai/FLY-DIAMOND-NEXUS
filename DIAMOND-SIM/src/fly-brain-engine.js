@@ -63,6 +63,30 @@
   }
 
   /**
+   * What each neuropil's descending vote is for. Used only by the gated
+   * consensus: escape circuits, goal-directed circuits and exploratory
+   * circuits should not all speak at once with the same authority.
+   */
+  const DESCENDING_GROUPS = Object.freeze({
+    sentinel: "reflex",   // Lateral Horn threat reflex and giant fibre escape
+    smp: "reflex",        // action commitment during an escape
+    forager: "goal",      // appetitive odour gradient
+    navigator: "goal",    // compass heading toward the goal
+    executive: "goal",    // Fan-Shaped Body goal vector
+    metabolic: "goal",    // sugar drive
+    optic: "goal",        // visual pursuit of the gradient
+    pioneer: "explore",   // novelty
+    lal: "explore",       // cast-and-surge zigzag search
+    aotu: "explore",      // celestial straight-line dispersal
+    eb: "explore",        // landmark-anchored forward momentum
+    pb: "explore",        // bilateral steering jitter
+    vault: "support",     // memory readout
+    vnc_cpg: "support",   // gait rhythm
+    ammc: "support",      // peer spacing
+    no: "support"         // odometry and homing
+  });
+
+  /**
    * Mechanism selection. Each option names a circuit model; the "legacy" values
    * reproduce the behaviour of earlier versions so that an upgrade can be
    * measured against it rather than merely asserted.
@@ -80,11 +104,17 @@
    *                            KC->MBON synapses, with slow recovery.
    *              "hebbian"   - legacy: symmetric potentiation and depression on
    *                            a net modulation term.
+   * consensus:   "gated"     - the descending vote is re-weighted by the fly's
+   *                            state, so threat, an appetitive gradient or
+   *                            neither each hand the motor pathway to a
+   *                            different set of neuropils.
+   *              "flat"      - legacy: one fixed weight per role, always.
    */
   const DEFAULT_CONFIG = Object.freeze({
     compass: "attractor",
     mbInhibition: "apl",
     plasticity: "dan-ltd",
+    consensus: "gated",
     // The APL loop has no set point: sparseness is whatever this gain and the
     // current input produce. kcTargetSparsity records the design target the
     // gains were calibrated against (Kenyon-cell responses are reported in the
@@ -109,7 +139,8 @@
   const LEGACY_CONFIG = Object.freeze(Object.assign({}, DEFAULT_CONFIG, {
     compass: "kinematic",
     mbInhibition: "topk",
-    plasticity: "hebbian"
+    plasticity: "hebbian",
+    consensus: "flat"
   }));
 
   function resolveConfig(overrides) {
@@ -1210,6 +1241,7 @@
       this.tdGamma = 0.85;
       this.lastRPE = 0;
       this.lastActionIndex = -1;
+      this.lastDescendingGains = null;
       this.syncytiumSteps = 0;
       this.isPretrained = false;
       this.pretrainingEpochs = 0;
@@ -1341,6 +1373,54 @@
     }
 
     /**
+     * Per-brain descending gains for this tick.
+     *
+     * Roles are grouped by what they are for, and the groups are boosted or
+     * suppressed according to the fly's situation. Total weight is conserved,
+     * so this redistributes the motor vote rather than turning the gain up:
+     * the softmax that follows stays on the same scale.
+     *
+     * @param {ArrayLike<number>} sensoryInput
+     * @param {Object<string, number>} roleWeights - baseline weight per role
+     * @returns {Float32Array} one gain per brain
+     */
+    _descendingGains(sensoryInput, roleWeights) {
+      const threat = clamp(sensoryInput[3] || 0, 0, 1);
+      const appetitive = clamp(sensoryInput[2] || 0, 0, 1);
+      const energy = Number.isFinite(sensoryInput[4]) ? sensoryInput[4] : 0.8;
+      const hunger = clamp(1 - energy, 0, 1);
+      // Hunger raises the value of a weak gradient: NPF-driven food seeking
+      // makes a hungry fly act on a scent a sated one would ignore.
+      const pursue = clamp(Math.max(appetitive, appetitive * 0.5 + hunger * 0.6), 0, 1);
+      const explore = clamp(1 - Math.max(pursue, threat), 0, 1);
+
+      const groupBoost = {
+        reflex: 1 + threat * 2.6,
+        goal: 1 + pursue * 2.2 - threat * 0.5,
+        explore: 1 + explore * 1.4 - pursue * 0.7 - threat * 0.6,
+        support: 1
+      };
+
+      const gains = new Float32Array(this.brainCount);
+      let total = 0;
+      let baseline = 0;
+      for (let i = 0; i < this.brainCount; i++) {
+        const role = this.brains[i].role;
+        const base = roleWeights[role] || 1.0;
+        const group = DESCENDING_GROUPS[role] || "support";
+        const gain = base * Math.max(0.15, groupBoost[group]);
+        gains[i] = gain;
+        total += gain;
+        baseline += base;
+      }
+      if (total > 1e-6) {
+        const scale = baseline / total;
+        for (let i = 0; i < this.brainCount; i++) gains[i] *= scale;
+      }
+      return gains;
+    }
+
+    /**
      * One forward pass through the syncytium for a single fly.
      *
      * @param {ArrayLike<number>} sensoryInput - 14-channel sensory vector
@@ -1433,7 +1513,15 @@
         }
       }
 
-      // 4. Consensus Motor Synthesis (16 Brains)
+      // 4. Descending motor synthesis.
+      //
+      // Sixteen neuropils do not vote as equals in an animal. The descending
+      // pathway is gated: a looming threat hands control to the escape
+      // circuits, an appetitive gradient hands it to the goal-directed ones,
+      // and in the absence of either, exploration takes over. With one fixed
+      // weight per role, as legacy mode does, the forager's odour gradient is
+      // one vote in sixteen and the exploratory biases outvote it, which is
+      // measurably worse than using fewer brains at all.
       const roleWeights = {
         forager: 1.2,
         navigator: 1.1,
@@ -1453,10 +1541,15 @@
         smp: 1.3
       };
 
+      const gains = this.config.consensus === "gated"
+        ? this._descendingGains(sensoryInput, roleWeights)
+        : null;
+      this.lastDescendingGains = gains;
+
       const consensusLogits = [0, 0, 0, 0];
       for (let i = 0; i < this.brainCount; i++) {
         const brain = this.brains[i];
-        const rW = roleWeights[brain.role] || 1.0;
+        const rW = gains ? gains[i] : (roleWeights[brain.role] || 1.0);
         for (let a = 0; a < 4; a++) {
           const direct = individualOutputs[i][a];
           const cross = commInteractions[i][a];
@@ -1585,7 +1678,9 @@
         epgRing: Array.from(this.brains[1].epgRing),
         kcSparsity: this.brains[3].kcSparsity,
         aplActivity: this.brains[3].aplActivity,
-        lastActionIndex: this.lastActionIndex
+        lastActionIndex: this.lastActionIndex,
+        consensusMode: this.config.consensus,
+        descendingGains: this.lastDescendingGains ? Array.from(this.lastDescendingGains) : null
       };
     }
 
@@ -2326,6 +2421,7 @@
   return {
     DEFAULT_CONFIG,
     LEGACY_CONFIG,
+    DESCENDING_GROUPS,
     resolveConfig,
     angleDelta,
     wrapAngle,
