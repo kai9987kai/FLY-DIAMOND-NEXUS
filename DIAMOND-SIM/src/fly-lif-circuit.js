@@ -153,8 +153,11 @@
       this.edgeStart[count] = cursor;
       this.edgeCount = edges.length;
 
-      // Delay line: postsynaptic drive arrives propagationDelay ms after a spike.
+      // Delay line: postsynaptic drive arrives propagationDelay ms after a
+      // spike, quantised to the timestep. effectiveDelay is what the circuit
+      // actually applies; a finer dt brings it closer to the parameter.
       this.delaySlots = Math.max(1, Math.round(this.params.propagationDelay / this.dt));
+      this.effectiveDelay = this.delaySlots * this.dt;
       this.delayBuffer = [];
       for (let i = 0; i < this.delaySlots; i++) this.delayBuffer.push(new Float32Array(count));
       this.delayCursor = 0;
@@ -221,8 +224,10 @@
         }
       }
 
-      // Schedule this step's spikes into the delay line.
-      const target = this.delayBuffer[(this.delayCursor + this.delaySlots - 1) % this.delaySlots];
+      // Schedule this step's spikes into the delay line. The slot just drained
+      // above is the one read delaySlots steps from now, which is the full
+      // delay; writing one slot earlier would deliver a step too soon.
+      const target = arriving;
       for (const n of fired) {
         const end = this.edgeStart[n + 1];
         for (let e = this.edgeStart[n]; e < end; e++) {

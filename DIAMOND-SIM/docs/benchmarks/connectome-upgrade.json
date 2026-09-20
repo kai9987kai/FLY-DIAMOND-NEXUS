@@ -7,7 +7,7 @@
     "bootstrapSeed": 20260912,
     "limitations": "A reduced 16x16 arena over a small seed set. Equal step budgets are not equal computation, and these seeds are not a held-out evaluation set."
   },
-  "generatedAt": "2026-09-20T09:49:02.199Z",
+  "generatedAt": "2026-09-20T10:14:18.220Z",
   "episodesPerArm": 20,
   "stepLimit": 200,
   "seeds": [
@@ -267,19 +267,19 @@
           "netScore": 5
         }
       ],
-      "winRate": 5
+      "winRate": 10
     },
     {
       "arm": "SingleBrain_AL",
       "episodes": 20,
-      "meanDiamonds": 6.4,
+      "meanDiamonds": 11.1,
       "meanHazards": 0,
       "meanStasis": 0,
-      "meanFinalEnergy": 5.5,
-      "meanStepsSurvived": 177.3,
-      "meanUniqueCells": 29,
-      "meanNetScore": 161,
-      "iqmNetScore": 132.6,
+      "meanFinalEnergy": 31,
+      "meanStepsSurvived": 180.05,
+      "meanUniqueCells": 45,
+      "meanNetScore": 283.6,
+      "iqmNetScore": 179.3,
       "raw": [
         {
           "arm": "SingleBrain_AL",
@@ -299,9 +299,9 @@
           "diamondsCollected": 10,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 11,
-          "uniqueCells": 42,
-          "netScore": 252
+          "finalEnergy": 47,
+          "uniqueCells": 40,
+          "netScore": 259
         },
         {
           "arm": "SingleBrain_AL",
@@ -311,7 +311,7 @@
           "hazardsHit": 0,
           "stasisEvents": 0,
           "finalEnergy": 0,
-          "uniqueCells": 30,
+          "uniqueCells": 31,
           "netScore": 125
         },
         {
@@ -329,12 +329,12 @@
           "arm": "SingleBrain_AL",
           "seed": 1293,
           "stepsSurvived": 200,
-          "diamondsCollected": 21,
+          "diamondsCollected": 25,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 68,
-          "uniqueCells": 86,
-          "netScore": 538
+          "finalEnergy": 126,
+          "uniqueCells": 107,
+          "netScore": 650
         },
         {
           "arm": "SingleBrain_AL",
@@ -344,7 +344,7 @@
           "hazardsHit": 0,
           "stasisEvents": 0,
           "finalEnergy": 0,
-          "uniqueCells": 32,
+          "uniqueCells": 34,
           "netScore": 150
         },
         {
@@ -355,7 +355,7 @@
           "hazardsHit": 0,
           "stasisEvents": 0,
           "finalEnergy": 0,
-          "uniqueCells": 10,
+          "uniqueCells": 12,
           "netScore": 100
         },
         {
@@ -373,12 +373,12 @@
           "arm": "SingleBrain_AL",
           "seed": 1585,
           "stepsSurvived": 200,
-          "diamondsCollected": 10,
+          "diamondsCollected": 42,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 16,
-          "uniqueCells": 46,
-          "netScore": 253
+          "finalEnergy": 160,
+          "uniqueCells": 138,
+          "netScore": 1082
         },
         {
           "arm": "SingleBrain_AL",
@@ -409,9 +409,9 @@
           "diamondsCollected": 10,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 6,
-          "uniqueCells": 39,
-          "netScore": 251
+          "finalEnergy": 4,
+          "uniqueCells": 38,
+          "netScore": 250
         },
         {
           "arm": "SingleBrain_AL",
@@ -428,45 +428,45 @@
           "arm": "SingleBrain_AL",
           "seed": 1950,
           "stepsSurvived": 200,
-          "diamondsCollected": 9,
+          "diamondsCollected": 13,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 6,
-          "uniqueCells": 46,
-          "netScore": 226
+          "finalEnergy": 45,
+          "uniqueCells": 71,
+          "netScore": 334
         },
         {
           "arm": "SingleBrain_AL",
           "seed": 2023,
-          "stepsSurvived": 170,
-          "diamondsCollected": 3,
+          "stepsSurvived": 200,
+          "diamondsCollected": 24,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 0,
-          "uniqueCells": 17,
-          "netScore": 75
+          "finalEnergy": 71,
+          "uniqueCells": 89,
+          "netScore": 614
         },
         {
           "arm": "SingleBrain_AL",
           "seed": 2096,
           "stepsSurvived": 200,
-          "diamondsCollected": 15,
+          "diamondsCollected": 16,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 3,
-          "uniqueCells": 44,
-          "netScore": 375
+          "finalEnergy": 10,
+          "uniqueCells": 48,
+          "netScore": 402
         },
         {
           "arm": "SingleBrain_AL",
           "seed": 2169,
-          "stepsSurvived": 175,
-          "diamondsCollected": 3,
+          "stepsSurvived": 200,
+          "diamondsCollected": 35,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 0,
-          "uniqueCells": 19,
-          "netScore": 75
+          "finalEnergy": 157,
+          "uniqueCells": 123,
+          "netScore": 906
         },
         {
           "arm": "SingleBrain_AL",
@@ -502,19 +502,19 @@
           "netScore": 25
         }
       ],
-      "winRate": 41.3
+      "winRate": 60
     },
     {
       "arm": "CentralComplex_8B",
       "episodes": 20,
-      "meanDiamonds": 6,
+      "meanDiamonds": 4.6,
       "meanHazards": 0,
       "meanStasis": 0,
-      "meanFinalEnergy": 30.7,
-      "meanStepsSurvived": 175.4,
-      "meanUniqueCells": 40.8,
-      "meanNetScore": 156,
-      "iqmNetScore": 121.1,
+      "meanFinalEnergy": 17.7,
+      "meanStepsSurvived": 166.9,
+      "meanUniqueCells": 31.65,
+      "meanNetScore": 118.45,
+      "iqmNetScore": 88.1,
       "raw": [
         {
           "arm": "CentralComplex_8B",
@@ -524,7 +524,7 @@
           "hazardsHit": 0,
           "stasisEvents": 0,
           "finalEnergy": 0,
-          "uniqueCells": 43,
+          "uniqueCells": 31,
           "netScore": 125
         },
         {
@@ -535,7 +535,7 @@
           "hazardsHit": 0,
           "stasisEvents": 0,
           "finalEnergy": 0,
-          "uniqueCells": 36,
+          "uniqueCells": 19,
           "netScore": 50
         },
         {
@@ -546,41 +546,41 @@
           "hazardsHit": 0,
           "stasisEvents": 0,
           "finalEnergy": 0,
-          "uniqueCells": 15,
+          "uniqueCells": 14,
           "netScore": 50
         },
         {
           "arm": "CentralComplex_8B",
           "seed": 1220,
-          "stepsSurvived": 200,
-          "diamondsCollected": 10,
+          "stepsSurvived": 125,
+          "diamondsCollected": 1,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 125,
-          "uniqueCells": 67,
-          "netScore": 275
+          "finalEnergy": 0,
+          "uniqueCells": 13,
+          "netScore": 25
         },
         {
           "arm": "CentralComplex_8B",
           "seed": 1293,
           "stepsSurvived": 200,
-          "diamondsCollected": 15,
+          "diamondsCollected": 14,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 118,
-          "uniqueCells": 77,
-          "netScore": 398
+          "finalEnergy": 48,
+          "uniqueCells": 72,
+          "netScore": 359
         },
         {
           "arm": "CentralComplex_8B",
           "seed": 1366,
-          "stepsSurvived": 200,
-          "diamondsCollected": 5,
+          "stepsSurvived": 150,
+          "diamondsCollected": 2,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 25,
-          "uniqueCells": 19,
-          "netScore": 130
+          "finalEnergy": 0,
+          "uniqueCells": 9,
+          "netScore": 50
         },
         {
           "arm": "CentralComplex_8B",
@@ -590,74 +590,74 @@
           "hazardsHit": 0,
           "stasisEvents": 0,
           "finalEnergy": 0,
-          "uniqueCells": 17,
+          "uniqueCells": 13,
           "netScore": 100
         },
         {
           "arm": "CentralComplex_8B",
           "seed": 1512,
           "stepsSurvived": 200,
-          "diamondsCollected": 6,
+          "diamondsCollected": 7,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 32,
-          "uniqueCells": 48,
-          "netScore": 156
+          "finalEnergy": 75,
+          "uniqueCells": 49,
+          "netScore": 190
         },
         {
           "arm": "CentralComplex_8B",
           "seed": 1585,
           "stepsSurvived": 200,
-          "diamondsCollected": 12,
+          "diamondsCollected": 14,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 94,
-          "uniqueCells": 85,
-          "netScore": 318
+          "finalEnergy": 119,
+          "uniqueCells": 89,
+          "netScore": 373
         },
         {
           "arm": "CentralComplex_8B",
           "seed": 1658,
-          "stepsSurvived": 200,
-          "diamondsCollected": 13,
+          "stepsSurvived": 150,
+          "diamondsCollected": 2,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 83,
-          "uniqueCells": 71,
-          "netScore": 341
+          "finalEnergy": 0,
+          "uniqueCells": 28,
+          "netScore": 50
         },
         {
           "arm": "CentralComplex_8B",
           "seed": 1731,
-          "stepsSurvived": 181,
-          "diamondsCollected": 6,
+          "stepsSurvived": 200,
+          "diamondsCollected": 8,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 0,
-          "uniqueCells": 42,
-          "netScore": 150
+          "finalEnergy": 31,
+          "uniqueCells": 53,
+          "netScore": 206
         },
         {
           "arm": "CentralComplex_8B",
           "seed": 1804,
-          "stepsSurvived": 200,
-          "diamondsCollected": 13,
+          "stepsSurvived": 186,
+          "diamondsCollected": 5,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 81,
-          "uniqueCells": 62,
-          "netScore": 341
+          "finalEnergy": 0,
+          "uniqueCells": 27,
+          "netScore": 125
         },
         {
           "arm": "CentralComplex_8B",
           "seed": 1877,
           "stepsSurvived": 200,
-          "diamondsCollected": 12,
+          "diamondsCollected": 8,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 56,
-          "uniqueCells": 45,
-          "netScore": 311
+          "finalEnergy": 51,
+          "uniqueCells": 30,
+          "netScore": 210
         },
         {
           "arm": "CentralComplex_8B",
@@ -667,7 +667,7 @@
           "hazardsHit": 0,
           "stasisEvents": 0,
           "finalEnergy": 0,
-          "uniqueCells": 31,
+          "uniqueCells": 30,
           "netScore": 75
         },
         {
@@ -678,7 +678,7 @@
           "hazardsHit": 0,
           "stasisEvents": 0,
           "finalEnergy": 0,
-          "uniqueCells": 14,
+          "uniqueCells": 26,
           "netScore": 50
         },
         {
@@ -689,19 +689,19 @@
           "hazardsHit": 0,
           "stasisEvents": 0,
           "finalEnergy": 0,
-          "uniqueCells": 31,
+          "uniqueCells": 19,
           "netScore": 25
         },
         {
           "arm": "CentralComplex_8B",
           "seed": 2169,
-          "stepsSurvived": 150,
-          "diamondsCollected": 2,
+          "stepsSurvived": 200,
+          "diamondsCollected": 7,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 0,
-          "uniqueCells": 30,
-          "netScore": 50
+          "finalEnergy": 30,
+          "uniqueCells": 61,
+          "netScore": 181
         },
         {
           "arm": "CentralComplex_8B",
@@ -711,7 +711,7 @@
           "hazardsHit": 0,
           "stasisEvents": 0,
           "finalEnergy": 0,
-          "uniqueCells": 27,
+          "uniqueCells": 18,
           "netScore": 25
         },
         {
@@ -722,22 +722,22 @@
           "hazardsHit": 0,
           "stasisEvents": 0,
           "finalEnergy": 0,
-          "uniqueCells": 25,
+          "uniqueCells": 20,
           "netScore": 75
         },
         {
           "arm": "CentralComplex_8B",
           "seed": 2388,
-          "stepsSurvived": 175,
-          "diamondsCollected": 3,
+          "stepsSurvived": 125,
+          "diamondsCollected": 1,
           "hazardsHit": 0,
           "stasisEvents": 0,
           "finalEnergy": 0,
-          "uniqueCells": 31,
-          "netScore": 75
+          "uniqueCells": 12,
+          "netScore": 25
         }
       ],
-      "winRate": 28.7
+      "winRate": 20
     },
     {
       "arm": "Syncytium_16B_Legacy",
@@ -972,166 +972,34 @@
           "netScore": 25
         }
       ],
-      "winRate": 1.3
+      "winRate": 2.5
     },
     {
       "arm": "Syncytium_16B",
       "episodes": 20,
-      "meanDiamonds": 5,
+      "meanDiamonds": 2.5,
       "meanHazards": 0,
       "meanStasis": 0,
-      "meanFinalEnergy": 23.15,
-      "meanStepsSurvived": 171.45,
-      "meanUniqueCells": 48.15,
-      "meanNetScore": 129.6,
-      "iqmNetScore": 91.5,
+      "meanFinalEnergy": 9.65,
+      "meanStepsSurvived": 142.4,
+      "meanUniqueCells": 18.35,
+      "meanNetScore": 64.4,
+      "iqmNetScore": 37.5,
       "raw": [
         {
           "arm": "Syncytium_16B",
           "seed": 1001,
-          "stepsSurvived": 200,
-          "diamondsCollected": 17,
+          "stepsSurvived": 125,
+          "diamondsCollected": 1,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 140,
-          "uniqueCells": 125,
-          "netScore": 453
+          "finalEnergy": 0,
+          "uniqueCells": 21,
+          "netScore": 25
         },
         {
           "arm": "Syncytium_16B",
           "seed": 1074,
-          "stepsSurvived": 150,
-          "diamondsCollected": 2,
-          "hazardsHit": 0,
-          "stasisEvents": 0,
-          "finalEnergy": 0,
-          "uniqueCells": 43,
-          "netScore": 50
-        },
-        {
-          "arm": "Syncytium_16B",
-          "seed": 1147,
-          "stepsSurvived": 150,
-          "diamondsCollected": 2,
-          "hazardsHit": 0,
-          "stasisEvents": 0,
-          "finalEnergy": 0,
-          "uniqueCells": 35,
-          "netScore": 50
-        },
-        {
-          "arm": "Syncytium_16B",
-          "seed": 1220,
-          "stepsSurvived": 200,
-          "diamondsCollected": 4,
-          "hazardsHit": 0,
-          "stasisEvents": 0,
-          "finalEnergy": 0,
-          "uniqueCells": 64,
-          "netScore": 100
-        },
-        {
-          "arm": "Syncytium_16B",
-          "seed": 1293,
-          "stepsSurvived": 200,
-          "diamondsCollected": 6,
-          "hazardsHit": 0,
-          "stasisEvents": 0,
-          "finalEnergy": 50,
-          "uniqueCells": 45,
-          "netScore": 160
-        },
-        {
-          "arm": "Syncytium_16B",
-          "seed": 1366,
-          "stepsSurvived": 200,
-          "diamondsCollected": 4,
-          "hazardsHit": 0,
-          "stasisEvents": 0,
-          "finalEnergy": 0,
-          "uniqueCells": 29,
-          "netScore": 100
-        },
-        {
-          "arm": "Syncytium_16B",
-          "seed": 1439,
-          "stepsSurvived": 175,
-          "diamondsCollected": 4,
-          "hazardsHit": 0,
-          "stasisEvents": 0,
-          "finalEnergy": 0,
-          "uniqueCells": 33,
-          "netScore": 100
-        },
-        {
-          "arm": "Syncytium_16B",
-          "seed": 1512,
-          "stepsSurvived": 150,
-          "diamondsCollected": 2,
-          "hazardsHit": 0,
-          "stasisEvents": 0,
-          "finalEnergy": 0,
-          "uniqueCells": 24,
-          "netScore": 50
-        },
-        {
-          "arm": "Syncytium_16B",
-          "seed": 1585,
-          "stepsSurvived": 200,
-          "diamondsCollected": 15,
-          "hazardsHit": 0,
-          "stasisEvents": 0,
-          "finalEnergy": 113,
-          "uniqueCells": 92,
-          "netScore": 397
-        },
-        {
-          "arm": "Syncytium_16B",
-          "seed": 1658,
-          "stepsSurvived": 100,
-          "diamondsCollected": 0,
-          "hazardsHit": 0,
-          "stasisEvents": 0,
-          "finalEnergy": 0,
-          "uniqueCells": 27,
-          "netScore": 0
-        },
-        {
-          "arm": "Syncytium_16B",
-          "seed": 1731,
-          "stepsSurvived": 200,
-          "diamondsCollected": 6,
-          "hazardsHit": 0,
-          "stasisEvents": 0,
-          "finalEnergy": 50,
-          "uniqueCells": 62,
-          "netScore": 160
-        },
-        {
-          "arm": "Syncytium_16B",
-          "seed": 1804,
-          "stepsSurvived": 200,
-          "diamondsCollected": 11,
-          "hazardsHit": 0,
-          "stasisEvents": 0,
-          "finalEnergy": 60,
-          "uniqueCells": 73,
-          "netScore": 287
-        },
-        {
-          "arm": "Syncytium_16B",
-          "seed": 1877,
-          "stepsSurvived": 200,
-          "diamondsCollected": 9,
-          "hazardsHit": 0,
-          "stasisEvents": 0,
-          "finalEnergy": 25,
-          "uniqueCells": 47,
-          "netScore": 230
-        },
-        {
-          "arm": "Syncytium_16B",
-          "seed": 1950,
           "stepsSurvived": 150,
           "diamondsCollected": 2,
           "hazardsHit": 0,
@@ -1142,36 +1010,168 @@
         },
         {
           "arm": "Syncytium_16B",
-          "seed": 2023,
+          "seed": 1147,
+          "stepsSurvived": 150,
+          "diamondsCollected": 2,
+          "hazardsHit": 0,
+          "stasisEvents": 0,
+          "finalEnergy": 0,
+          "uniqueCells": 23,
+          "netScore": 50
+        },
+        {
+          "arm": "Syncytium_16B",
+          "seed": 1220,
+          "stepsSurvived": 100,
+          "diamondsCollected": 0,
+          "hazardsHit": 0,
+          "stasisEvents": 0,
+          "finalEnergy": 0,
+          "uniqueCells": 3,
+          "netScore": 0
+        },
+        {
+          "arm": "Syncytium_16B",
+          "seed": 1293,
+          "stepsSurvived": 200,
+          "diamondsCollected": 13,
+          "hazardsHit": 0,
+          "stasisEvents": 0,
+          "finalEnergy": 151,
+          "uniqueCells": 65,
+          "netScore": 355
+        },
+        {
+          "arm": "Syncytium_16B",
+          "seed": 1366,
+          "stepsSurvived": 150,
+          "diamondsCollected": 2,
+          "hazardsHit": 0,
+          "stasisEvents": 0,
+          "finalEnergy": 0,
+          "uniqueCells": 13,
+          "netScore": 50
+        },
+        {
+          "arm": "Syncytium_16B",
+          "seed": 1439,
+          "stepsSurvived": 173,
+          "diamondsCollected": 4,
+          "hazardsHit": 0,
+          "stasisEvents": 0,
+          "finalEnergy": 0,
+          "uniqueCells": 9,
+          "netScore": 100
+        },
+        {
+          "arm": "Syncytium_16B",
+          "seed": 1512,
           "stepsSurvived": 125,
           "diamondsCollected": 1,
           "hazardsHit": 0,
           "stasisEvents": 0,
           "finalEnergy": 0,
-          "uniqueCells": 24,
+          "uniqueCells": 8,
           "netScore": 25
         },
         {
           "arm": "Syncytium_16B",
+          "seed": 1585,
+          "stepsSurvived": 125,
+          "diamondsCollected": 1,
+          "hazardsHit": 0,
+          "stasisEvents": 0,
+          "finalEnergy": 0,
+          "uniqueCells": 14,
+          "netScore": 25
+        },
+        {
+          "arm": "Syncytium_16B",
+          "seed": 1658,
+          "stepsSurvived": 100,
+          "diamondsCollected": 0,
+          "hazardsHit": 0,
+          "stasisEvents": 0,
+          "finalEnergy": 0,
+          "uniqueCells": 4,
+          "netScore": 0
+        },
+        {
+          "arm": "Syncytium_16B",
+          "seed": 1731,
+          "stepsSurvived": 100,
+          "diamondsCollected": 0,
+          "hazardsHit": 0,
+          "stasisEvents": 0,
+          "finalEnergy": 0,
+          "uniqueCells": 4,
+          "netScore": 0
+        },
+        {
+          "arm": "Syncytium_16B",
+          "seed": 1804,
+          "stepsSurvived": 200,
+          "diamondsCollected": 10,
+          "hazardsHit": 0,
+          "stasisEvents": 0,
+          "finalEnergy": 42,
+          "uniqueCells": 40,
+          "netScore": 258
+        },
+        {
+          "arm": "Syncytium_16B",
+          "seed": 1877,
+          "stepsSurvived": 150,
+          "diamondsCollected": 2,
+          "hazardsHit": 0,
+          "stasisEvents": 0,
+          "finalEnergy": 0,
+          "uniqueCells": 10,
+          "netScore": 50
+        },
+        {
+          "arm": "Syncytium_16B",
+          "seed": 1950,
+          "stepsSurvived": 150,
+          "diamondsCollected": 2,
+          "hazardsHit": 0,
+          "stasisEvents": 0,
+          "finalEnergy": 0,
+          "uniqueCells": 14,
+          "netScore": 50
+        },
+        {
+          "arm": "Syncytium_16B",
+          "seed": 2023,
+          "stepsSurvived": 150,
+          "diamondsCollected": 2,
+          "hazardsHit": 0,
+          "stasisEvents": 0,
+          "finalEnergy": 0,
+          "uniqueCells": 17,
+          "netScore": 50
+        },
+        {
+          "arm": "Syncytium_16B",
           "seed": 2096,
-          "stepsSurvived": 179,
+          "stepsSurvived": 200,
           "diamondsCollected": 4,
           "hazardsHit": 0,
           "stasisEvents": 0,
           "finalEnergy": 0,
-          "uniqueCells": 25,
+          "uniqueCells": 26,
           "netScore": 100
         },
         {
           "arm": "Syncytium_16B",
           "seed": 2169,
-          "stepsSurvived": 200,
-          "diamondsCollected": 5,
+          "stepsSurvived": 125,
+          "diamondsCollected": 1,
           "hazardsHit": 0,
           "stasisEvents": 0,
-          "finalEnergy": 25,
-          "uniqueCells": 53,
-          "netScore": 130
+          "finalEnergy": 0,
+          "uniqueCells": 9,
+          "netScore": 25
         },
         {
           "arm": "Syncytium_16B",
@@ -1181,33 +1181,33 @@
           "hazardsHit": 0,
           "stasisEvents": 0,
           "finalEnergy": 0,
-          "uniqueCells": 30,
+          "uniqueCells": 8,
           "netScore": 25
         },
         {
           "arm": "Syncytium_16B",
           "seed": 2315,
-          "stepsSurvived": 150,
-          "diamondsCollected": 2,
+          "stepsSurvived": 125,
+          "diamondsCollected": 1,
           "hazardsHit": 0,
           "stasisEvents": 0,
           "finalEnergy": 0,
-          "uniqueCells": 51,
-          "netScore": 50
+          "uniqueCells": 11,
+          "netScore": 25
         },
         {
           "arm": "Syncytium_16B",
           "seed": 2388,
-          "stepsSurvived": 175,
-          "diamondsCollected": 3,
+          "stepsSurvived": 125,
+          "diamondsCollected": 1,
           "hazardsHit": 0,
           "stasisEvents": 0,
           "finalEnergy": 0,
-          "uniqueCells": 41,
-          "netScore": 75
+          "uniqueCells": 28,
+          "netScore": 25
         }
       ],
-      "winRate": 23.8
+      "winRate": 7.5
     }
   ],
   "comparisons": [
@@ -1249,30 +1249,30 @@
       "arm": "SingleBrain_AL",
       "reference": "Syncytium_16B_Legacy",
       "pairCount": 20,
-      "meanDelta": 127.25,
+      "meanDelta": 249.85,
       "ci95": [
-        82.55,
-        174.807
+        131.226,
+        387.642
       ],
       "probabilityOfImprovement": 0.95,
       "perSeedDeltas": [
         25,
-        227,
+        234,
         100,
         75,
-        438,
+        550,
         125,
         0,
         75,
-        228,
+        1057,
         25,
         150,
-        226,
+        225,
         150,
-        176,
-        50,
-        300,
-        50,
+        284,
+        589,
+        327,
+        881,
         25,
         100,
         0
@@ -1283,33 +1283,33 @@
       "arm": "CentralComplex_8B",
       "reference": "Syncytium_16B_Legacy",
       "pairCount": 20,
-      "meanDelta": 122.25,
+      "meanDelta": 84.7,
       "ci95": [
-        71.847,
-        174.41
+        44.745,
+        127.712
       ],
-      "probabilityOfImprovement": 0.925,
+      "probabilityOfImprovement": 0.9,
       "perSeedDeltas": [
         100,
         25,
         25,
-        275,
-        298,
-        105,
+        25,
+        259,
+        25,
         0,
-        131,
-        293,
-        316,
-        150,
-        316,
-        261,
+        165,
+        348,
+        25,
+        206,
+        100,
+        160,
         25,
         25,
         -50,
-        25,
+        156,
         25,
         50,
-        50
+        0
       ],
       "separatesFromZero": true
     },
@@ -1317,42 +1317,42 @@
       "arm": "Syncytium_16B",
       "reference": "Syncytium_16B_Legacy",
       "pairCount": 20,
-      "meanDelta": 95.85,
+      "meanDelta": 30.65,
       "ci95": [
-        47.987,
-        152.65
+        5,
+        65.616
       ],
-      "probabilityOfImprovement": 0.875,
+      "probabilityOfImprovement": 0.675,
       "perSeedDeltas": [
-        428,
-        25,
-        25,
-        100,
-        60,
-        75,
         0,
         25,
-        372,
+        25,
+        0,
+        255,
+        25,
+        0,
+        0,
+        0,
         -25,
-        160,
-        262,
-        180,
+        0,
+        233,
         0,
         0,
         25,
-        105,
         25,
+        0,
         25,
-        50
+        0,
+        0
       ],
       "separatesFromZero": true
     }
   ],
-  "runtimeMs": 1036,
+  "runtimeMs": 1118,
   "sourceHashes": {
-    "src/fly-brain-engine.js": "3663561ff1d4d5fa64083ba3b739f557a6ae11ff66e9a41779370994c8157976",
-    "src/fly-lif-circuit.js": "36b46ff9d6887d6cb999f94bd2a20c7066f40a5ee24bba72c56a2c87a2f4ca40",
-    "src/connectome-benchmark.js": "e1a1b112663570b64ab825155a3956e1c5eebd3f3fa97b4c08f1cc36ac8d0d1a",
+    "src/fly-brain-engine.js": "6b54ac306bd9ee1e3d1f3580ef0617d4bf8aa872a16d13de0e9dcf354f0567c0",
+    "src/fly-lif-circuit.js": "e190e6ae3fd3add1ded7d5ea7138cae6b13d0d3ad5b94ebbed49898614207c85",
+    "src/connectome-benchmark.js": "e20fdb5631e8b4fd46bf2041d10da5a8517723d8ab47ad3d5f3e4273d8ef8fd9",
     "scripts/connectome-benchmark.cjs": "17568ff3c3b3a09b33f474391a6c874ad32dd4649fec4de31c2ea9fc5b454c95"
   },
   "node": "v22.22.2"

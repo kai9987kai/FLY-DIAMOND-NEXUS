@@ -174,3 +174,52 @@ test("the report carries its protocol, its limitations and every raw episode", a
     assert.equal(arm.raw.length, 2, "raw per-seed observations must be retained");
   }
 });
+
+test("the single-brain arm learns differentially under the dopamine-gated rule", () => {
+  // Nothing outside a syncytium sets lastActionIndex, and the rule treats -1 as
+  // "every channel was taken", which makes the update carry no direction at all.
+  const { SingleBrainPolicy } = CB;
+  const policy = new SingleBrainPolicy();
+  const observation = [0.5, 0.5, 0.25, 0.05, 0.8, 0.4, 0, 1, 0, 1, 0, 0, 0.12, 0.05];
+
+  const chosen = policy.act(observation, 0, 0, 100, 0, 5, 5, 16);
+  assert.equal(policy.brain.lastActionIndex, chosen, "the brain must be told what it did");
+
+  const before = policy.brain.kcToMbonWeights.slice();
+  policy.reinforce(0, 1.0);
+  const after = policy.brain.kcToMbonWeights;
+
+  const row = Array.from({ length: policy.brain.KC_BASE_COUNT }, (_, k) => k)
+    .find(k => Math.abs(after[k * 4] - before[k * 4]) > 1e-9);
+  assert.ok(row !== undefined, "punishment must change some synapse");
+
+  const deltas = [0, 1, 2, 3].map(m => after[row * 4 + m] - before[row * 4 + m]);
+  assert.ok(
+    new Set(deltas.map(d => d.toFixed(9))).size > 1,
+    `all four channels moved identically (${deltas.join(", ")}), so the update has no direction`
+  );
+  assert.ok(deltas[chosen] < Math.max(...deltas.filter((_, m) => m !== chosen)),
+    "the punished channel must be depressed more than the others");
+});
+
+test("the spiking policy breaks a two-way tie instead of always turning the same way", () => {
+  const { SpikingMushroomBodyPolicy } = CB;
+  const policy = new SpikingMushroomBodyPolicy(3);
+  // Force a tie for the lead across the output neurons.
+  const counts = new Uint32Array(policy.circuit.count);
+  policy.circuit.run = () => { for (const i of policy.mbonIndices) counts[i] = 0; counts[policy.mbonIndices[0]] = 5; counts[policy.mbonIndices[1]] = 5; return counts; };
+
+  const seen = new Set();
+  for (let i = 0; i < 40; i++) seen.add(policy.act(new Array(14).fill(0.3), 0, 0, 100, i, 8, 8, 16));
+  assert.ok(seen.size > 1, `a tie for the lead collapsed into one direction: ${[...seen].join(",")}`);
+});
+
+test("a single seed is rejected rather than reported as an interval-free comparison", async () => {
+  const runner = new ConnectomeBenchmarkRunner();
+  await assert.rejects(
+    () => runner.runComparativeBenchmark({ seeds: [7], stepLimit: 5 }),
+    /at least two seeds/
+  );
+  const fallback = await runner.runComparativeBenchmark({ seeds: [], episodesPerArm: 2, stepLimit: 5 });
+  assert.equal(fallback.seeds.length, 2, "an empty list falls back to the default seeds");
+});

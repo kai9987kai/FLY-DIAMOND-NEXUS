@@ -743,3 +743,120 @@ test("proximity and payment are reported separately", () => {
   assert.equal(second.isTriSwarmResonance, false, "no second payout inside the refractory window");
   assert.equal(second.isTriSwarmInRange, true, "but the cluster is still a cluster");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Regressions found by review
+// ─────────────────────────────────────────────────────────────────────────────
+test("the ring keeps turning the right way up to a half turn per tick", () => {
+  // Grid worlds turn in multiples of pi/2. Before the rotation was clamped it
+  // wrapped past pi and ran the compass backwards at exactly the rates these
+  // agents produce.
+  for (const omega of [Math.PI / 2, -Math.PI / 2, 2.9, -2.9, 3.14, -3.14, 0.8, 2.0]) {
+    const brain = new DrosophilaBrain(1, "navigator");
+    const gain = integrateHeading(brain, omega, 20) / (omega * 20);
+    assert.ok(
+      gain > 0.5 && gain < 1.5,
+      `at ${omega.toFixed(2)} rad/tick the gain was ${gain.toFixed(3)}: the compass turned the wrong way or stalled`
+    );
+  }
+
+  // Exactly half a turn is direction-ambiguous: pi left and pi right reach the
+  // same heading. The requirement is that the magnitude is right and that the
+  // ring resolves it the same way every time, not that it guesses.
+  const magnitude = omega => {
+    const brain = new DrosophilaBrain(1, "navigator");
+    return Math.abs(integrateHeading(brain, omega, 20) / (omega * 20));
+  };
+  assert.ok(Math.abs(magnitude(Math.PI) - 1) < 0.15);
+  assert.ok(Math.abs(magnitude(-Math.PI) - 1) < 0.15);
+  assert.equal(magnitude(Math.PI), magnitude(-Math.PI), "the tie must be resolved consistently");
+});
+
+test("a fly that has grown neurons does not hand their activity to a new fly", () => {
+  const syncytium = new SixteenFlyBrainSyncytium(21);
+  for (let t = 0; t < 40; t++) syncytium.step(OBS(0.5, 0.5), 0.2, 0.9, 100, null, "veteran");
+  const grown = syncytium.brains[4].bornNeurons.length;
+  assert.ok(grown > 0, "the probe must actually grow neurons");
+  assert.ok(syncytium.brains[4].bornNeurons.some(n => n.activation > 0), "and leave some of them active");
+
+  syncytium.loadEgo("rookie");
+  assert.ok(
+    syncytium.brains[4].bornNeurons.every(n => n.activation === 0),
+    "a fresh fly's grown neurons must be silent, not carry the veteran's activity"
+  );
+});
+
+test("each fly's prediction error is scored against its own value estimate", () => {
+  const syncytium = new SixteenFlyBrainSyncytium(7);
+  syncytium.step(OBS(0.5, 0.5, 0.8), 0.1, 0, 100, null, "a");
+  syncytium.step(OBS(0.9, 0.9, 0.3, 0.5), 0.1, 0, 40, null, "b");
+
+  syncytium.applyReinforcement(1, 0, null, "a");
+  const rpeA = syncytium.lastRPE;
+  syncytium.applyReinforcement(1, 0, null, "b");
+  const rpeB = syncytium.lastRPE;
+
+  assert.notEqual(rpeA, rpeB, "identical outcomes for differently-valued states must differ");
+  assert.equal(
+    syncytium.egoValues.get("a") === syncytium.egoValues.get("b"),
+    false,
+    "the value estimates themselves must be held per fly"
+  );
+});
+
+test("plasticity credits the action the fly executed, not the consensus argmax", () => {
+  const graft = new MultiAgentGraphGraft(new SixteenFlyBrainSyncytium(5), 0.55);
+  // Corners, so the legality filter frequently overrides the raw argmax.
+  const env = {
+    agent1X: 0, agent1Y: 0, agent1Energy: 120,
+    agent2X: 19, agent2Y: 19, agent2Energy: 120,
+    agent3X: 0, agent3Y: 19, agent3Energy: 120,
+    gridSize: 20
+  };
+  const deltas = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+
+  for (let t = 0; t < 40; t++) {
+    const result = graft.resolveAgents(env, OBS(0.02, 0.02), OBS(0.98, 0.98), OBS(0.02, 0.98));
+    for (const [key, ego, state] of [
+      ["agent1", "agent1", result.agent1],
+      ["agent2", "agent2", result.agent2],
+      ["agent3", "agent3", result.agent3]
+    ]) {
+      graft.syncytium.loadEgo(ego);
+      assert.equal(
+        graft.syncytium.brains[3].lastActionIndex,
+        state.actionIndex,
+        `${ego} recorded a different action from the one it executed on tick ${t}`
+      );
+      const [dx, dy] = deltas[state.action];
+      env[`${key}X`] = Math.max(0, Math.min(19, env[`${key}X`] + dx));
+      env[`${key}Y`] = Math.max(0, Math.min(19, env[`${key}Y`] + dy));
+    }
+  }
+});
+
+test("telemetry keeps naming the same fly however the swarm moves", () => {
+  const graft = new MultiAgentGraphGraft(new SixteenFlyBrainSyncytium(9), 0.55);
+  const clustered = {
+    agent1X: 10, agent1Y: 10, agent1Energy: 100,
+    agent2X: 11, agent2Y: 10, agent2Energy: 100,
+    agent3X: 10, agent3Y: 11, agent3Energy: 100, gridSize: 20
+  };
+  const spread = Object.assign({}, clustered, { agent3X: 19, agent3Y: 19 });
+
+  graft.resolveAgents(clustered, OBS(0.5, 0.5), OBS(0.55, 0.5), OBS(0.5, 0.55));
+  const whenClustered = graft.syncytium.getTelemetry().activeEgoId;
+  graft.resolveAgents(spread, OBS(0.5, 0.5), OBS(0.55, 0.5), OBS(0.95, 0.95));
+  const whenSpread = graft.syncytium.getTelemetry().activeEgoId;
+  graft.feedback(5, false, { x: 0.5, y: 0.5 }, "agent2");
+  const afterCredit = graft.syncytium.getTelemetry().activeEgoId;
+
+  assert.equal(whenClustered, "agent1");
+  assert.equal(whenSpread, "agent1", "a handshake starting or stopping must not switch whose registers are reported");
+  assert.equal(afterCredit, "agent1", "crediting another fly must not switch it either");
+});
+
+test("an empty Kenyon-cell pool settles at no inhibition rather than throwing", () => {
+  const brain = new DrosophilaBrain(0, "forager");
+  assert.equal(brain._settleApl([]), 0);
+});

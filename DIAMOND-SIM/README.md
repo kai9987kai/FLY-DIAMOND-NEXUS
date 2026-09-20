@@ -80,7 +80,9 @@ npm run benchmark:connectome -- --episodes 20 --steps 200 \
 npm run benchmark:connectome -- --arms RandomWalk,Spiking_MB,Syncytium_16B --episodes 8
 ```
 
-Every arm runs the same seeds. The report gives paired percentile bootstrap intervals over seed-level differences, probability of improvement, an interquartile mean and tie-split win shares, plus every raw episode and the source hashes that produced them. An interval straddling zero is not evidence either way. [Recorded results](docs/validation.md#fly-lab-upgraded-circuits-versus-the-legacy-ones) include the case where a single-brain arm still beats all sixteen.
+Every arm runs the same seeds. The report gives paired percentile bootstrap intervals over seed-level differences, probability of improvement, an interquartile mean and tie-split win shares, plus every raw episode and the source hashes that produced them. An interval straddling zero is not evidence either way.
+
+[Recorded results](docs/validation.md#fly-lab-upgraded-circuits-versus-the-legacy-ones): the upgraded circuits beat the ones they replaced by +30.65 net score over 20 seeds, 95% interval [+5.00, +65.62], with every mechanism contributing. In the same arena a single Antennal Lobe brain scores 4.4× the full syncytium and beats it on every metric, so nothing here says sixteen coupled neuropils outperform one.
 
 ## Nexus reliability changes
 

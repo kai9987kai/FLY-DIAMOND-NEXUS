@@ -4,29 +4,41 @@
 
 Three circuits in the Fly Lab carried the name of a fly structure without its mechanism, and the descending vote treated all sixteen neuropils as equals. Each replacement is selectable, so the comparison is against the code it replaced rather than against nothing. The [raw receipt](benchmarks/connectome-upgrade.json) records source SHA-256 hashes, the seed set, every per-seed episode and the bootstrap settings.
 
-Protocol fixed before running: seeds 1001 to 2388 in steps of 73, twenty of them, 200 steps per episode, a 16×16 arena with 8 diamonds and 4 hazards, every arm on the same seeds. Reference arm `Syncytium_16B_Legacy`. Intervals are paired percentile bootstrap over seed-level differences, 2,000 resamples, bootstrap seed 20260912.
+Protocol fixed before running: seeds 1001 to 2388 in steps of 73, twenty of them, 200 steps per episode, a 16×16 arena with 8 diamonds and 4 hazards, every arm on the same seeds. Reference arm `Syncytium_16B_Legacy`. Intervals are paired percentile bootstrap over seed-level differences, 2,000 resamples, bootstrap seed 20260912. No parameter was changed after seeing these numbers.
 
 | Arm | Net score | IQM | Diamonds | Hazards | Cells seen | Win share |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| RandomWalk | 21.80 | 11.0 | 1.75 | 1.15 | 51.45 | 5.0% |
-| SingleBrain_AL | 161.00 | 132.6 | 6.40 | 0 | 29.00 | 41.3% |
-| CentralComplex_8B | 156.00 | 121.1 | 6.00 | 0 | 40.80 | 28.7% |
-| Syncytium_16B_Legacy | 33.75 | 25.0 | 1.35 | 0 | 13.65 | 1.3% |
-| **Syncytium_16B** | **129.60** | **91.5** | **5.00** | **0** | **48.15** | **23.8%** |
+| RandomWalk | 21.80 | 11.0 | 1.75 | 1.15 | 51.45 | 10.0% |
+| SingleBrain_AL | 283.60 | 179.3 | 11.10 | 0 | 45.00 | 60.0% |
+| CentralComplex_8B | 118.45 | 88.1 | 4.60 | 0 | 31.65 | 20.0% |
+| Syncytium_16B_Legacy | 33.75 | 25.0 | 1.35 | 0 | 13.65 | 2.5% |
+| **Syncytium_16B** | **64.40** | **37.5** | **2.50** | **0** | **18.35** | **7.5%** |
 
 | Arm | Difference from legacy | 95% interval | P(improvement) | Clears zero |
 | --- | ---: | --- | ---: | --- |
 | RandomWalk | −11.95 | [−37.00, +15.05] | 0.35 | no |
-| SingleBrain_AL | +127.25 | [+82.55, +174.81] | 0.95 | yes |
-| CentralComplex_8B | +122.25 | [+71.85, +174.41] | 0.93 | yes |
-| Syncytium_16B | **+95.85** | **[+47.99, +152.65]** | 0.88 | yes |
+| SingleBrain_AL | +249.85 | [+131.23, +387.64] | 0.95 | yes |
+| CentralComplex_8B | +84.70 | [+44.74, +127.71] | 0.90 | yes |
+| Syncytium_16B | **+30.65** | **[+5.00, +65.62]** | 0.68 | yes |
 
-The upgraded 16-brain syncytium beats the circuit it replaced by **+95.85 net score per episode**, with an interval that clears zero, and it visits 48.15 cells to the legacy arm's 13.65. Net score is `25 × diamonds − 20 × hazards − 8 × stasis + floor(0.2 × energy)`; win shares split ties evenly.
+The upgraded 16-brain syncytium beats the circuit it replaced by **+30.65 net score per episode**, with an interval that clears zero, though not by much. Net score is `25 × diamonds − 20 × hazards − 8 × stasis + floor(0.2 × energy)`; win shares split ties evenly.
 
-Two results are reported because they are true, not because they flatter the change:
+Rolling each mechanism back on its own, over the same 20 seeds, shows every one of them contributing:
 
-- **A single Antennal Lobe brain still scores higher than all sixteen** (161.00 against 129.60), and the 8-brain Central Complex subset is close behind it. Adding neuropils does not help in this arena. Gating the descending vote closed most of the gap — before it, the full syncytium scored 121.7 against the same 161 — but not all of it. On coverage the ordering reverses: 48.15 cells against 29.00.
-- **The spiking arm is inconclusive.** Over 8 seeds at 120 steps, `Spiking_MB` scored +21.75 against a random walk with an interval of [−14.13, +58.00]. It is a fixed circuit with no plasticity and no navigation, so this is the expected result; it is included to check that a spiking implementation behaves sensibly in the loop, not to win.
+| Configuration | Net score |
+| --- | ---: |
+| All four upgraded mechanisms | **64.40** |
+| Kinematic compass instead of the ring attractor | 51.00 |
+| Top-k selection instead of APL feedback | 55.55 |
+| Hebbian instead of dopamine-gated depression | 50.35 |
+| Flat descending vote instead of gating | 36.25 |
+| All four legacy (the reference arm) | 33.75 |
+
+Three results are reported because they are true, not because they flatter the change:
+
+- **A single Antennal Lobe brain scores 4.4× the full syncytium** (283.60 against 64.40), and beats it on every metric reported here, coverage included. Adding neuropils does not help in this arena; it hurts, substantially. State-dependent gating is the largest single contributor to the syncytium's score and still leaves it far behind. Closing that gap is the clearest piece of work left, and nothing here should be read as evidence that sixteen coupled neuropils outperform one.
+- **The spiking arm is inconclusive.** Over 8 seeds at 120 steps, `Spiking_MB` scored +5.00 against a random walk with an interval of [−35.76, +46.25]. It is a fixed circuit with no plasticity and no navigation, so this is the expected result; it is included to check that a spiking implementation behaves sensibly in the loop, not to win. On that seed set the syncytium's own interval against a random walk also straddles zero.
+- **An earlier revision of this page reported +95.85 for the same comparison.** That measurement was taken while the ring attractor silently reversed for turns of half a circle, which on a four-direction grid is every direction reversal, and while the single-brain arm's plasticity was a no-op. Both are fixed; these are the numbers from the corrected code.
 
 This is one reduced arena and one convenience seed set, not a held-out benchmark. Equal step budgets are not equal computation: the spiking arm costs roughly an order of magnitude more per episode than the rate-coded ones.
 
@@ -43,7 +55,7 @@ Each replaced circuit was measured directly, and the numbers are asserted in `te
 
 | Mechanism | Measurement |
 | --- | --- |
-| E-PG ring attractor | Angular-velocity gain 0.99–1.01 over ±0.4 rad per tick; heading held within 0.15 rad over 60 idle ticks; a 0.045 celestial anchor cuts accumulated drift from 0.17 rad to 0.004 rad over 300 wobbly ticks, and does not drag the bump across the ring. |
+| E-PG ring attractor | Angular-velocity gain 0.99–1.01 over ±0.4 rad per tick and within ±50% out to ±3.14; heading held within 0.15 rad over 60 idle ticks; a 0.045 celestial anchor cuts accumulated drift from 0.17 rad to 0.004 rad over 300 wobbly ticks, and does not drag the bump across the ring. A turn of exactly half a circle is direction-ambiguous and is resolved consistently; the two choices reach the same heading. |
 | APL feedback inhibition | Active Kenyon cells 18.8% at weak drive, 15.6% at mid, 6.3% at 15× drive, with APL activity rising in step. The legacy top-k mode gives the identical fraction at every drive, by construction. |
 | Dopamine-gated depression | Punishment depresses the taken channel; reward leaves the taken channel stronger relative to every alternative; with dopamine silent, depressed synapses recover toward baseline. |
 | Descending gating | Threat raises the reflex group's share and lowers exploration's; a gradient raises the goal group's; hunger amplifies a weak gradient; total descending weight is conserved to within 1e-3. |
@@ -60,6 +72,13 @@ Most of these surfaced only by driving the app and by reporting per-seed statist
 | Social resonance paid every tick it was in range | Huddling out-earned foraging: 65% of ticks in resonance with energy pinned near maximum. Now rate-limited below the metabolic cost of a tick. |
 | Win rate awarded ties to the first arm listed | `RandomWalk` was listed first. |
 | Neurogenesis drew from `Math.random`, snapshots restored a draw count but not generator state | The same world seed grew different Kenyon cells on every run, and a resumed run silently diverged. |
+| The ring attractor's rotation wrapped past half a turn | A direction reversal, which is exactly half a turn and the commonest event on a four-direction grid, ran the compass backwards: measured gain −0.89 at π. |
+| A brain used outside a syncytium was never told which action it took | The dopamine-gated rule treats "no action" as "every channel was taken", so the update carried no direction and the `SingleBrain_AL` arm did not learn at all. Its score went from 161.00 to 283.60 once fixed. |
+| Plasticity credited the syncytium's own argmax | The executed action can differ after policy mixing, the legality filter or a commitment latch. Measured at 12% of ticks: those punishments depressed a channel the fly never used. |
+| The value estimate behind the prediction error was a single shared scalar | One fly's outcome was scored against another fly's estimate of its situation. |
+| A new fly inherited the previous one's Kenyon-cell activations | The pristine record was captured before any neurons existed, so the restore loop copied nothing and left the previous fly's activity in place. |
+| The spike-to-PSP delay line was written one slot early | Postsynaptic potentials arrived 1.5 ms after a spike instead of the documented 1.8 ms, and the test's one-timestep slack hid it. |
+| Telemetry read per-fly registers off the shared brains | The Circuit Mechanisms panel silently switched which individual it was describing whenever a handshake started or stopped. |
 
 ## Frozen original comparison
 
@@ -97,7 +116,7 @@ The shooting-planner comparison was inconclusive and beam had +0.2 hazard hits p
 
 ## Regression and browser checks
 
-Current working version: **137/138 Node tests pass** (the optional TensorFlow download test is skipped offline), and **38 Chromium browser checks pass**. The Nexus browser section needs `cdn.jsdelivr.net` for TensorFlow.js and Chart.js; where there is no route to it the suite reports that section as skipped and never as passed. JavaScript syntax, local asset and HTML ID checks pass.
+Current working version: **147/148 Node tests pass** (the optional TensorFlow download test is skipped offline), and **38 Chromium browser checks pass**. The Nexus browser section needs `cdn.jsdelivr.net` for TensorFlow.js and Chart.js; where there is no route to it the suite reports that section as skipped and never as passed. JavaScript syntax, local asset and HTML ID checks pass.
 
 Test coverage added for the Fly Lab: `tests/fly-brain-upgrades.test.cjs` (determinism, exact resume, one tick per environment step, per-fly register isolation, credit assignment, the ring attractor, APL sparseness, dopamine-gated depression, descending gating, heading from motion, legal moves, the social refractory and the snapshot contract), `tests/fly-lif.test.cjs` (the spiking neuron model) and `tests/connectome-stats.test.cjs` (the statistics and the benchmark runner's contract).
 

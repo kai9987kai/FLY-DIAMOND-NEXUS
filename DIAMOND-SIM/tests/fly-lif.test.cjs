@@ -80,10 +80,23 @@ test("an excitatory spike depolarises its target only after the propagation dela
     if (firstPreSpike >= 0 && firstPostChange >= 0) break;
   }
   assert.ok(firstPreSpike > 0, "the driven neuron must spike");
+  // Exactly the quantised delay: a slack of one timestep here would hide an
+  // off-by-one in the delay line, which is where one was hiding.
   assert.ok(
-    firstPostChange >= firstPreSpike + LIF_PARAMS.propagationDelay - circuit.dt,
-    `target depolarised at ${firstPostChange} ms, before the ${LIF_PARAMS.propagationDelay} ms delay elapsed`
+    Math.abs(circuit.effectiveDelay - LIF_PARAMS.propagationDelay) < 1e-9,
+    "1.8 ms lands exactly on a 0.2 ms grid"
   );
+  assert.ok(
+    Math.abs((firstPostChange - firstPreSpike) - circuit.effectiveDelay) < 1e-9,
+    `target depolarised ${(firstPostChange - firstPreSpike).toFixed(2)} ms after the spike, expected ${circuit.effectiveDelay}`
+  );
+});
+
+test("a finer timestep brings the propagation delay closer to the parameter", () => {
+  const coarse = new LIFConnectomeCircuit({ neurons: [{ id: "a" }], connections: [], dt: 1.0 });
+  const fine = new LIFConnectomeCircuit({ neurons: [{ id: "a" }], connections: [], dt: 0.1 });
+  assert.equal(coarse.effectiveDelay, 2.0);
+  assert.ok(Math.abs(fine.effectiveDelay - LIF_PARAMS.propagationDelay) < 1e-9);
 });
 
 test("an inhibitory presynaptic neuron hyperpolarises its target", () => {

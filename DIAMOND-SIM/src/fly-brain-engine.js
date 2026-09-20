@@ -462,9 +462,17 @@
         if (!dst || dst.length !== src.length) dst = ego.arrays[key] = new Float32Array(src.length);
         dst.set(src);
       }
-      ego.arrays.lastVisualSensors = Float32Array.from(this.lastVisualSensors);
-      ego.arrays.ammcPeerAcoustic = Float32Array.from(this.ammcPeerAcoustic);
-      ego.arrays.noHomeVector = Float32Array.from(this.noHomeVector);
+      // These three live as plain arrays on the brain, so copy them into reused
+      // buffers rather than allocating three per brain on every forward pass.
+      for (const [key, source] of [
+        ["lastVisualSensors", this.lastVisualSensors],
+        ["ammcPeerAcoustic", this.ammcPeerAcoustic],
+        ["noHomeVector", this.noHomeVector]
+      ]) {
+        let buffer = ego.arrays[key];
+        if (!buffer || buffer.length !== source.length) buffer = ego.arrays[key] = new Float32Array(source.length);
+        for (let i = 0; i < source.length; i++) buffer[i] = source[i];
+      }
       const born = ego.born && ego.born.length === this.bornNeurons.length
         ? ego.born
         : new Float32Array(this.bornNeurons.length);
@@ -483,12 +491,24 @@
         const src = ego.arrays[key];
         if (src && this[key] && this[key].length === src.length) this[key].set(src);
       }
-      if (ego.arrays.lastVisualSensors) this.lastVisualSensors = Array.from(ego.arrays.lastVisualSensors);
-      if (ego.arrays.ammcPeerAcoustic) this.ammcPeerAcoustic = Array.from(ego.arrays.ammcPeerAcoustic);
-      if (ego.arrays.noHomeVector) this.noHomeVector = Array.from(ego.arrays.noHomeVector);
-      if (ego.born) {
-        const n = Math.min(ego.born.length, this.bornNeurons.length);
-        for (let i = 0; i < n; i++) this.bornNeurons[i].activation = ego.born[i];
+      // Written in place: these are read every forward pass and loadEgo runs
+      // several times a tick, so reallocating them is pure churn.
+      for (const [key, target] of [
+        ["lastVisualSensors", this.lastVisualSensors],
+        ["ammcPeerAcoustic", this.ammcPeerAcoustic],
+        ["noHomeVector", this.noHomeVector]
+      ]) {
+        const source = ego.arrays[key];
+        if (!source) continue;
+        const n = Math.min(source.length, target.length);
+        for (let i = 0; i < n; i++) target[i] = source[i];
+      }
+      // Neurons grown since this record was captured hold the previous fly's
+      // activity; a record that does not mention a neuron means it was silent,
+      // not that whatever is there should carry over.
+      const stored = ego.born ? ego.born.length : 0;
+      for (let i = 0; i < this.bornNeurons.length; i++) {
+        this.bornNeurons[i].activation = i < stored ? ego.born[i] : 0;
       }
     }
 
@@ -519,22 +539,28 @@
       // one wedge over, in the direction the fly is turning, so the bump moves
       // by the angular velocity itself: the integrator has unit gain by
       // construction instead of needing a tuned coefficient.
-      const shift = cfg.ringShiftGain * angularVelocity;
+      //
+      // The rotation is clamped just inside a half turn. Beyond that the wrap
+      // is genuinely ambiguous -- a turn of exactly pi is as much left as right
+      // -- and letting it wrap silently reverses the compass, which grid worlds
+      // hit constantly because a direction reversal is exactly pi.
+      const limit = Math.PI - 1e-6;
+      const shift = clamp(cfg.ringShiftGain * angleDelta(angularVelocity, 0), -limit, limit);
       const sigma = cfg.ringSigma;
       const twoSigmaSq = 2 * sigma * sigma;
 
-      const next = new Float32Array(n);
+      // The kernel depends only on the wedge separation, so one row of n
+      // weights serves every wedge and the mass is the same for all of them.
+      const kernel = this._ringKernel(n, shift, twoSigmaSq);
+      let kernelSum = 0;
+      for (let d = 0; d < n; d++) kernelSum += kernel[d];
+
+      const next = this._ringScratch && this._ringScratch.length === n
+        ? this._ringScratch
+        : (this._ringScratch = new Float32Array(n));
       for (let i = 0; i < n; i++) {
-        const prefAngle = (i / n) * 2 * Math.PI;
         let acc = 0;
-        let kernelSum = 0;
-        for (let j = 0; j < n; j++) {
-          const srcAngle = (j / n) * 2 * Math.PI;
-          const d = angleDelta(prefAngle - shift, srcAngle);
-          const k = Math.exp(-(d * d) / twoSigmaSq);
-          acc += k * ring[j];
-          kernelSum += k;
-        }
+        for (let j = 0; j < n; j++) acc += kernel[(i - j + n) % n] * ring[j];
         // Normalising by the kernel mass keeps the recurrent term on the same
         // scale as the activity it drives, so the wedge lattice cannot pin the
         // bump and the integrator keeps unit gain.
@@ -543,7 +569,7 @@
         let drive = cfg.ringExcitation * recurrent - inhibition;
 
         if (anchorHeading !== null && anchorGain > 0) {
-          const d = angleDelta(prefAngle, anchorHeading);
+          const d = angleDelta((i / n) * 2 * Math.PI, anchorHeading);
           drive += anchorGain * Math.exp(-(d * d) / twoSigmaSq);
         }
 
@@ -555,6 +581,7 @@
       let total = 0;
       for (let i = 0; i < n; i++) total += next[i];
       if (total < 1e-6) {
+        next.fill(0);
         // The bump died; re-seed it at the last decoded heading rather than
         // silently reporting an all-zero compass.
         const seed = Math.round((this.compassHeading / (2 * Math.PI)) * n) % n;
@@ -578,6 +605,18 @@
       return this.compassHeading;
     }
 
+    /** One row of the rotated excitation kernel, indexed by wedge separation. */
+    _ringKernel(n, shift, twoSigmaSq) {
+      let kernel = this._ringKernelBuffer;
+      if (!kernel || kernel.length !== n) kernel = this._ringKernelBuffer = new Float32Array(n);
+      const step = (2 * Math.PI) / n;
+      for (let d = 0; d < n; d++) {
+        const separation = angleDelta(d * step - shift, 0);
+        kernel[d] = Math.exp(-(separation * separation) / twoSigmaSq);
+      }
+      return kernel;
+    }
+
     /**
      * APL feedback inhibition over the Kenyon-cell population.
      *
@@ -590,8 +629,9 @@
      * @returns {number} the settled APL activity
      */
     _settleApl(pool) {
+      if (!pool.length) return 0;
       const cfg = this.config;
-      const n = pool.length || 1;
+      const n = pool.length;
       const relax = 0.6;
       let apl = 0;
       // Damped iteration. Solving the loop undamped overshoots and then
@@ -1261,6 +1301,10 @@
       // Shared connectome, separate bodies: one ego record per fly holds the
       // registers that must not leak between individuals.
       this.egoStates = new Map();
+      // The value estimate feeding the reward-prediction error is per fly too:
+      // a shared scalar means one individual's outcome is scored against
+      // whichever individual stepped last.
+      this.egoValues = new Map();
       this._pristineEgo = this.brains.map(b => b.captureEgo());
       this.activeEgoId = null;
     }
@@ -1559,14 +1603,20 @@
 
       this.lastEstimatedValue = (consensusLogits[0] + consensusLogits[1] + consensusLogits[2] + consensusLogits[3]) / 4;
 
-      // The channel the consensus favoured. Dopamine-gated depression needs it
-      // to know which KC->MBON synapses coincided with the outcome.
+      // The channel this syncytium favoured. A caller that then executes a
+      // different action -- because it mixes in its own policy, filters out
+      // illegal moves or holds a commitment latch -- must say so through
+      // setExecutedAction, or dopamine will depress a channel the fly did not
+      // use and spare the one it did.
       let chosen = 0;
       for (let a = 1; a < 4; a++) if (consensusLogits[a] > consensusLogits[chosen]) chosen = a;
       this.lastActionIndex = chosen;
       for (let i = 0; i < this.brainCount; i++) this.brains[i].lastActionIndex = chosen;
 
-      if (egoId !== null && egoId !== undefined) this.saveEgo(egoId);
+      if (egoId !== null && egoId !== undefined) {
+        this.egoValues.set(egoId, this.lastEstimatedValue);
+        this.saveEgo(egoId);
+      }
       if (this._tickAuto) {
         this._tickOpen = false;
         this._tickAuto = false;
@@ -1584,10 +1634,33 @@
      *   connectome without naming the fly would train whichever individual
      *   stepped last.
      */
+    /**
+     * Record the action a fly actually executed, so plasticity credits the
+     * channel that drove it.
+     *
+     * @param {number} actionIndex
+     * @param {*} [egoId]
+     */
+    setExecutedAction(actionIndex, egoId = null) {
+      if (!Number.isInteger(actionIndex) || actionIndex < 0 || actionIndex > 3) return this;
+      const restore = this.activeEgoId;
+      if (egoId !== null && egoId !== undefined) this.loadEgo(egoId);
+      this.lastActionIndex = actionIndex;
+      for (let i = 0; i < this.brainCount; i++) this.brains[i].lastActionIndex = actionIndex;
+      if (egoId !== null && egoId !== undefined) {
+        this.saveEgo(egoId);
+        if (restore !== null && restore !== undefined && restore !== egoId) this.loadEgo(restore);
+      }
+      return this;
+    }
+
     applyReinforcement(rewardDelta, hazardDelta, currentCoordinates = null, egoId = null) {
       if (egoId !== null && egoId !== undefined) this.loadEgo(egoId);
+      const estimate = egoId !== null && egoId !== undefined && this.egoValues.has(egoId)
+        ? this.egoValues.get(egoId)
+        : this.lastEstimatedValue;
       const netExtrinsic = rewardDelta - (hazardDelta * 1.5);
-      const rpe = netExtrinsic + (this.tdGamma * this.lastEstimatedValue * 0.1) - (this.lastEstimatedValue * 0.1);
+      const rpe = netExtrinsic + (this.tdGamma * estimate * 0.1) - (estimate * 0.1);
       this.lastRPE = rpe;
 
       const pamBurst = Math.max(0, rpe > 0 ? rpe : rewardDelta);
@@ -1667,6 +1740,8 @@
         circadianPhase: this.circadianClock < this.circadianPeriod / 2 ? "DAY" : "NIGHT",
         pdfArousal: this.pdfArousal,
         tick: this.tickCount,
+        // Per-fly fields below (ring, sparseness, neuromodulators, compass)
+        // describe this individual, not an average over the swarm.
         activeEgoId: this.activeEgoId,
         compassMode: this.config.compass,
         mbInhibition: this.config.mbInhibition,
@@ -2125,7 +2200,20 @@
         this.syncytium.applyReinforcement(0.8, 0.0, null, EGO_AGENT3);
       }
 
+      // The executed actions, which are not necessarily the syncytium's own
+      // argmax: they have been mixed with the caller's policy, filtered for
+      // legality and possibly held by a commitment latch.
+      this.syncytium.setExecutedAction(maxA1, EGO_AGENT1);
+      this.syncytium.setExecutedAction(maxA2, EGO_AGENT2);
+      if (hasAgent3) this.syncytium.setExecutedAction(maxA3, EGO_AGENT3);
+
       this.syncytium.endTick();
+
+      // Leave the harvester loaded. Telemetry reads per-fly registers off the
+      // shared brains, so without this the panel would describe whichever fly
+      // happened to be reinforced last, switching identity whenever a handshake
+      // started or stopped.
+      this.syncytium.loadEgo(EGO_AGENT1);
 
       return {
         agent1: {
@@ -2183,10 +2271,10 @@
       this._updateAgentRegime(this.agent1, agentState);
       const resolved = motion
         ? this._resolveHeading(this.agent1, motion.stepDx || 0, motion.stepDy || 0)
-        : {
-          heading: Math.atan2(agentState[1] - 0.5, agentState[0] - 0.5),
-          angularVelocity: Math.atan2(agentState[1] - 0.5, agentState[0] - 0.5) - this.agent1.lastHeading
-        };
+        : (() => {
+          const bearing = Math.atan2(agentState[1] - 0.5, agentState[0] - 0.5);
+          return { heading: bearing, angularVelocity: angleDelta(bearing, this.agent1.lastHeading) };
+        })();
       const h1 = resolved.heading;
       const flyProbs = this.syncytium.step(
         agentState, resolved.angularVelocity, novelty, agentEnergy, null, EGO_AGENT1
@@ -2225,6 +2313,8 @@
       const rewardDelta = Math.max(0, reward);
       const hazardDelta = hitHazard ? 1.0 : (reward < 0 ? Math.abs(reward) : 0);
       this.syncytium.applyReinforcement(rewardDelta, hazardDelta, currentCoordinates, agentKey);
+      // Restore the telemetry fly rather than leaving the credited one loaded.
+      this.syncytium.loadEgo(EGO_AGENT1);
     }
   }
 

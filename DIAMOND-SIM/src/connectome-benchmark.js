@@ -394,11 +394,17 @@
       const outputs = this.brain.forward(sensoryObs, 0, null, null);
       const sorted = [0, 1, 2, 3].sort((a, b) => outputs[b] - outputs[a]);
       const dxs = [0, 0, -1, 1], dys = [-1, 1, 0, 0];
+      let chosen = sorted[0];
       for (const a of sorted) {
         const nx = currentX + dxs[a], ny = currentY + dys[a];
-        if (nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize) return a;
+        if (nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize) { chosen = a; break; }
       }
-      return sorted[0];
+      // Nothing else sets this on a brain used outside a syncytium, and the
+      // dopamine-gated rule reads it to decide which channel coincided with the
+      // outcome. Left at -1 it treats every channel as the taken one, so the
+      // update carries no direction at all and this arm never learns.
+      this.brain.lastActionIndex = chosen;
+      return chosen;
     }
     reinforce(rew, haz) {
       this.brain.applyPlasticity(rew > 0 ? 1.0 : 0, haz > 0 ? 1.0 : 0);
@@ -524,7 +530,7 @@
       // Output rates saturate into ties often enough that a deterministic
       // tie-break would collapse into one direction; break ties on the seeded
       // stream instead.
-      if (preference[order[0]] === preference[order[order.length - 1]]) {
+      if (preference[order[0]] === preference[order[1]]) {
         const legal = [];
         for (let a = 0; a < 4; a++) {
           const nx = currentX + dxs[a];
@@ -663,7 +669,12 @@
       for (const arm of arms) {
         if (!this.knownArms().includes(arm)) throw new Error(`Unsupported benchmark arm: ${arm}`);
       }
-      const baseSeeds = seeds || Array.from({ length: episodesPerArm }, (_, i) => 1001 + i * 73);
+      const baseSeeds = seeds && seeds.length
+        ? seeds
+        : Array.from({ length: episodesPerArm }, (_, i) => 1001 + i * 73);
+      if (seeds && seeds.length === 1) {
+        throw new Error("Paired intervals need at least two seeds; one seed gives a difference with no interval.");
+      }
       if (new Set(baseSeeds).size !== baseSeeds.length) {
         throw new Error("Benchmark seeds must be distinct: paired statistics need one pair per seed.");
       }
