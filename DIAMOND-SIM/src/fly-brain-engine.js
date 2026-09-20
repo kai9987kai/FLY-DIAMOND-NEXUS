@@ -49,6 +49,78 @@
     return exp.map(v => v / sum);
   }
 
+  /** Shortest signed angular difference, in (-pi, pi]. */
+  function angleDelta(a, b) {
+    let d = (a - b) % (2 * Math.PI);
+    if (d > Math.PI) d -= 2 * Math.PI;
+    if (d <= -Math.PI) d += 2 * Math.PI;
+    return d;
+  }
+
+  function wrapAngle(a) {
+    const t = a % (2 * Math.PI);
+    return t < 0 ? t + 2 * Math.PI : t;
+  }
+
+  /**
+   * Mechanism selection. Each option names a circuit model; the "legacy" values
+   * reproduce the behaviour of earlier versions so that an upgrade can be
+   * measured against it rather than merely asserted.
+   *
+   * compass:     "attractor" - recurrent E-PG/P-EN ring attractor in the CX,
+   *                            heading persists in population activity and is
+   *                            integrated from angular velocity.
+   *              "kinematic" - legacy: heading is a scalar the caller sets and
+   *                            the ring is only drawn from it.
+   * mbInhibition:"apl"       - APL pools Kenyon-cell output and feeds back
+   *                            divisive plus subtractive inhibition, so
+   *                            sparseness emerges from gain control.
+   *              "topk"      - legacy: hard top-15% selection by sorting.
+   * plasticity:  "dan-ltd"   - dopamine-gated depression of coincidently active
+   *                            KC->MBON synapses, with slow recovery.
+   *              "hebbian"   - legacy: symmetric potentiation and depression on
+   *                            a net modulation term.
+   */
+  const DEFAULT_CONFIG = Object.freeze({
+    compass: "attractor",
+    mbInhibition: "apl",
+    plasticity: "dan-ltd",
+    // The APL loop has no set point: sparseness is whatever this gain and the
+    // current input produce. kcTargetSparsity records the design target the
+    // gains were calibrated against (Kenyon-cell responses are reported in the
+    // few-percent to ~20% range) and is not enforced.
+    kcTargetSparsity: 0.1,
+    aplFeedbackGain: 3.4,
+    aplDivisiveGain: 2.6,
+    aplSubtractiveGain: 0.55,
+    ringExcitation: 1.6,
+    ringInhibition: 0.55,
+    ringSigma: 0.62,
+    ringRate: 0.9,
+    // Calibrated so decoded heading tracks integrated angular velocity with
+    // gain 0.99-1.01 over +/-0.4 rad per tick; relaxation at ringRate would
+    // otherwise leave the bump lagging by that factor.
+    ringShiftGain: 1.1,
+    ltdRate: 0.055,
+    ltdRecovery: 0.004,
+    kcMbonBaseline: 0.25
+  });
+
+  const LEGACY_CONFIG = Object.freeze(Object.assign({}, DEFAULT_CONFIG, {
+    compass: "kinematic",
+    mbInhibition: "topk",
+    plasticity: "hebbian"
+  }));
+
+  function resolveConfig(overrides) {
+    if (overrides === "legacy") return Object.assign({}, LEGACY_CONFIG);
+    if (overrides === "default" || !overrides) return Object.assign({}, DEFAULT_CONFIG);
+    const base = overrides.preset === "legacy" ? LEGACY_CONFIG : DEFAULT_CONFIG;
+    const merged = Object.assign({}, base, overrides);
+    delete merged.preset;
+    return merged;
+  }
+
   // -------------------------------------------------------------
   // Deterministic PRNG: Mulberry32
   // -------------------------------------------------------------
@@ -223,9 +295,10 @@
      * @param {number} id - Brain ID (0 to 10)
      * @param {string} role - Specialized computational role
      */
-    constructor(id, role = "general") {
+    constructor(id, role = "general", config = null) {
       this.id = id;
       this.role = role;
+      this.config = resolveConfig(config);
 
       // Neuropil dimensions
       this.GLOMERULI_COUNT = 14;
@@ -239,6 +312,19 @@
       this.mbonActivations = new Float32Array(this.MBON_COUNT);
       this.compassRing = new Float32Array(this.COMPASS_COUNT);
       this.compassHeading = 0;
+
+      // E-PG ring attractor state (Central Complex compass). Unlike compassRing,
+      // which is only a readout, this is the recurrent activity that carries
+      // heading between ticks.
+      this.epgRing = new Float32Array(this.COMPASS_COUNT);
+      this.epgRing[0] = 1.0;
+      this.ringAmplitude = 1.0;
+      this.ringCertainty = 1.0;
+
+      // Mushroom-body gain control readouts
+      this.aplActivity = 0;
+      this.kcSparsity = 0;
+      this.lastActionIndex = -1;
 
       // Brain 5: Optic Lobe motion flow
       this.opticMotionFlow = new Float32Array(4);
@@ -325,7 +411,8 @@
       "metabolicSatiety", "sugarDrive", "bitterAversion",
       "neuropeptideNPF", "neuropeptideSIFamide",
       "dopaminePAM", "dopaminePPL1", "octopamineOA", "serotonin5HT", "pdfArousal",
-      "lastHazardSense", "loomingVelocity", "giantFiberTriggered"
+      "lastHazardSense", "loomingVelocity", "giantFiberTriggered",
+      "ringAmplitude", "ringCertainty", "aplActivity", "kcSparsity", "lastActionIndex"
     ];
 
     static EGO_ARRAYS = [
@@ -372,6 +459,125 @@
         const n = Math.min(ego.born.length, this.bornNeurons.length);
         for (let i = 0; i < n; i++) this.bornNeurons[i].activation = ego.born[i];
       }
+    }
+
+    /**
+     * One update of the E-PG ring attractor.
+     *
+     * Local recurrent excitation sustains a single activity bump; pooled
+     * inhibition keeps exactly one bump alive; and an angular-velocity input
+     * shifts it, which is the P-EN contribution. Heading is then read out as
+     * the population vector average, so it is held by the network rather than
+     * supplied by the caller.
+     *
+     * @param {number} angularVelocity - radians per tick
+     * @param {number} [anchorHeading] - external reference (landmark or sun)
+     * @param {number} [anchorGain] - how strongly the anchor pins the bump
+     */
+    updateRingAttractor(angularVelocity = 0, anchorHeading = null, anchorGain = 0) {
+      const n = this.COMPASS_COUNT;
+      const cfg = this.config;
+      const ring = this.epgRing;
+
+      let pooled = 0;
+      for (let i = 0; i < n; i++) pooled += ring[i];
+      const inhibition = (cfg.ringInhibition * pooled) / n;
+
+      // P-EN shift, as a rotation of the recurrent kernel rather than a
+      // finite-difference nudge. E-PG cells excite P-EN cells that project back
+      // one wedge over, in the direction the fly is turning, so the bump moves
+      // by the angular velocity itself: the integrator has unit gain by
+      // construction instead of needing a tuned coefficient.
+      const shift = cfg.ringShiftGain * angularVelocity;
+      const sigma = cfg.ringSigma;
+      const twoSigmaSq = 2 * sigma * sigma;
+
+      const next = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const prefAngle = (i / n) * 2 * Math.PI;
+        let acc = 0;
+        let kernelSum = 0;
+        for (let j = 0; j < n; j++) {
+          const srcAngle = (j / n) * 2 * Math.PI;
+          const d = angleDelta(prefAngle - shift, srcAngle);
+          const k = Math.exp(-(d * d) / twoSigmaSq);
+          acc += k * ring[j];
+          kernelSum += k;
+        }
+        // Normalising by the kernel mass keeps the recurrent term on the same
+        // scale as the activity it drives, so the wedge lattice cannot pin the
+        // bump and the integrator keeps unit gain.
+        const recurrent = kernelSum > 0 ? acc / kernelSum : 0;
+
+        let drive = cfg.ringExcitation * recurrent - inhibition;
+
+        if (anchorHeading !== null && anchorGain > 0) {
+          const d = angleDelta(prefAngle, anchorHeading);
+          drive += anchorGain * Math.exp(-(d * d) / twoSigmaSq);
+        }
+
+        // Activity relaxes toward the network drive at ringRate; this is the
+        // membrane time constant of the standard continuous-attractor model.
+        next[i] = Math.max(0, ring[i] + cfg.ringRate * (drive - ring[i]));
+      }
+
+      let total = 0;
+      for (let i = 0; i < n; i++) total += next[i];
+      if (total < 1e-6) {
+        // The bump died; re-seed it at the last decoded heading rather than
+        // silently reporting an all-zero compass.
+        const seed = Math.round((this.compassHeading / (2 * Math.PI)) * n) % n;
+        next[(seed + n) % n] = 1.0;
+        total = 1.0;
+      }
+      // Normalising keeps total activity bounded without capping any wedge.
+      for (let i = 0; i < n; i++) ring[i] = next[i] / total;
+
+      let sx = 0;
+      let sy = 0;
+      for (let i = 0; i < n; i++) {
+        const prefAngle = (i / n) * 2 * Math.PI;
+        sx += ring[i] * Math.cos(prefAngle);
+        sy += ring[i] * Math.sin(prefAngle);
+      }
+      this.ringAmplitude = Math.hypot(sx, sy);
+      // Population vector length: 1 for a single sharp wedge, 0 for a flat ring.
+      this.ringCertainty = clamp(this.ringAmplitude, 0, 1);
+      this.compassHeading = wrapAngle(Math.atan2(sy, sx));
+      return this.compassHeading;
+    }
+
+    /**
+     * APL feedback inhibition over the Kenyon-cell population.
+     *
+     * The APL neuron pools Kenyon-cell output and inhibits the whole
+     * population, both divisively and subtractively. Sparseness therefore
+     * emerges from the strength of the input instead of being pinned to a fixed
+     * fraction, and a few fixed-point iterations settle the loop in O(cells).
+     *
+     * @param {Array<{isBorn:boolean,idx:number,val:number}>} pool
+     * @returns {number} the settled APL activity
+     */
+    _settleApl(pool) {
+      const cfg = this.config;
+      const n = pool.length || 1;
+      const relax = 0.6;
+      let apl = 0;
+      // Damped iteration. Solving the loop undamped overshoots and then
+      // collapses to zero inhibition on alternating passes, which is how a
+      // feedback circuit with too much loop gain misbehaves in simulation as
+      // well as in a cell.
+      for (let iteration = 0; iteration < 8; iteration++) {
+        let sum = 0;
+        for (let i = 0; i < n; i++) {
+          const v = pool[i].val / (1 + cfg.aplDivisiveGain * apl) - cfg.aplSubtractiveGain * apl;
+          if (v > 0) sum += v;
+        }
+        const target = cfg.aplFeedbackGain * (sum / n);
+        apl += relax * (target - apl);
+        if (apl < 0) apl = 0;
+      }
+      return apl;
     }
 
     _initSparseAlKcWeights(kcCount) {
@@ -523,18 +729,39 @@
       for (let b = 0; b < this.bornNeurons.length; b++) {
         allKc.push({ isBorn: true, idx: b, val: this.bornNeurons[b].activation });
       }
-      allKc.sort((a, b) => b.val - a.val);
 
-      const topK = Math.max(2, Math.floor(allKc.length * 0.15));
-      for (let i = 0; i < allKc.length; i++) {
-        const item = allKc[i];
-        const actVal = i < topK ? clamp(item.val, 0, 1) : 0.0;
-        if (!item.isBorn) {
-          this.kcActivations[item.idx] = actVal;
-        } else {
-          this.bornNeurons[item.idx].activation = actVal;
+      let activeCount = 0;
+      if (this.config.mbInhibition === "apl") {
+        const apl = this._settleApl(allKc);
+        this.aplActivity = apl;
+        for (let i = 0; i < allKc.length; i++) {
+          const item = allKc[i];
+          const inhibited = item.val / (1 + this.config.aplDivisiveGain * apl)
+            - this.config.aplSubtractiveGain * apl;
+          const actVal = inhibited > 0 ? clamp(inhibited, 0, 1) : 0.0;
+          if (actVal > 0) activeCount++;
+          if (!item.isBorn) {
+            this.kcActivations[item.idx] = actVal;
+          } else {
+            this.bornNeurons[item.idx].activation = actVal;
+          }
         }
+      } else {
+        allKc.sort((a, b) => b.val - a.val);
+        const topK = Math.max(2, Math.floor(allKc.length * 0.15));
+        for (let i = 0; i < allKc.length; i++) {
+          const item = allKc[i];
+          const actVal = i < topK ? clamp(item.val, 0, 1) : 0.0;
+          if (actVal > 0) activeCount++;
+          if (!item.isBorn) {
+            this.kcActivations[item.idx] = actVal;
+          } else {
+            this.bornNeurons[item.idx].activation = actVal;
+          }
+        }
+        this.aplActivity = 0;
       }
+      this.kcSparsity = allKc.length > 0 ? activeCount / allKc.length : 0;
 
       // 3. MBON Readout
       for (let m = 0; m < this.MBON_COUNT; m++) {
@@ -549,13 +776,30 @@
         this.mbonActivations[m] = clamp(sum, 0, 2);
       }
 
-      // 4. Central Complex Compass Ring Attractor
-      this.compassHeading = (this.compassHeading + headingDelta + 2 * Math.PI) % (2 * Math.PI);
-      for (let c = 0; c < this.COMPASS_COUNT; c++) {
-        const prefAngle = (c / this.COMPASS_COUNT) * 2 * Math.PI;
-        let diff = Math.abs(this.compassHeading - prefAngle);
-        if (diff > Math.PI) diff = 2 * Math.PI - diff;
-        this.compassRing[c] = Math.exp(-((diff * diff) / (2 * 0.4 * 0.4)));
+      // 4. Central Complex compass.
+      //
+      // In attractor mode the navigator brain holds the only true compass: a
+      // recurrent E-PG ring that integrates angular velocity and is anchored,
+      // weakly, to the celestial reference. Other neuropils receive the decoded
+      // heading by commissural broadcast, one tick behind, and only draw their
+      // readout from it. In kinematic (legacy) mode every brain integrates the
+      // same scalar independently and the ring is decorative.
+      if (this.config.compass === "attractor" && this.role === "navigator") {
+        const sunAnchor = peerContext && Number.isFinite(peerContext.sunAngle)
+          ? peerContext.sunAngle
+          : null;
+        this.updateRingAttractor(headingDelta, sunAnchor, sunAnchor === null ? 0 : 0.045);
+        this.compassRing.set(this.epgRing);
+      } else {
+        if (this.config.compass !== "attractor") {
+          this.compassHeading = (this.compassHeading + headingDelta + 2 * Math.PI) % (2 * Math.PI);
+        }
+        for (let c = 0; c < this.COMPASS_COUNT; c++) {
+          const prefAngle = (c / this.COMPASS_COUNT) * 2 * Math.PI;
+          let diff = Math.abs(this.compassHeading - prefAngle);
+          if (diff > Math.PI) diff = 2 * Math.PI - diff;
+          this.compassRing[c] = Math.exp(-((diff * diff) / (2 * 0.4 * 0.4)));
+        }
       }
 
       // 5. Lateral Horn Innate Avoidance, Giant Fiber (GF) Looming Reflex & Action Geometry
@@ -691,6 +935,11 @@
       this.dopaminePAM = clamp(rewardDelta, 0, 2);
       this.dopaminePPL1 = clamp(hazardDelta, 0, 2);
 
+      if (this.config.plasticity === "dan-ltd") {
+        this._applyDopamineGatedDepression();
+        return;
+      }
+
       const netModulation = (this.dopaminePAM * 1.2) - (this.dopaminePPL1 * 1.5);
       const learningRate = 0.05 * (0.8 + this.serotonin5HT * 0.4);
       const decay = 0.001;
@@ -718,6 +967,70 @@
           const deltaW = learningRate * (pre * post) * netModulation;
           neuron.mbonWeights[m] = clamp(neuron.mbonWeights[m] + deltaW - decay * neuron.mbonWeights[m], 0.01, 2.0);
         }
+      }
+    }
+
+    /**
+     * Dopamine-gated, depression-dominant plasticity at KC->MBON synapses.
+     *
+     * Coincidence of Kenyon-cell activity with dopaminergic input depresses the
+     * synapse, which is how olfactory learning is expressed in the mushroom
+     * body: the readout is the difference between MBON channels, so weakening
+     * one channel strengthens the alternative. Here punishment (PPL1) depresses
+     * the channel that was actually taken, and reward (PAM) depresses the
+     * channels that were not, with a smaller potentiation of the taken channel
+     * for the bidirectional component. Depressed synapses recover slowly toward
+     * baseline, which is this model's forgetting term.
+     */
+    _applyDopamineGatedDepression() {
+      const cfg = this.config;
+      const rate = cfg.ltdRate * (0.8 + this.serotonin5HT * 0.4);
+      const action = this.lastActionIndex;
+      const pam = this.dopaminePAM;
+      const ppl1 = this.dopaminePPL1;
+      const baseline = cfg.kcMbonBaseline;
+      const recovery = cfg.ltdRecovery;
+
+      const applyToRow = (pre, readWeight, writeWeight, traceIndex) => {
+        for (let m = 0; m < this.MBON_COUNT; m++) {
+          const taken = action < 0 || m === action;
+          let trace = pre;
+          if (traceIndex >= 0) {
+            const idx = traceIndex + m;
+            this.eligibilityTraces[idx] = 0.8 * this.eligibilityTraces[idx] + pre;
+            trace = clamp(this.eligibilityTraces[idx], 0, 4);
+          }
+
+          let delta = 0;
+          if (ppl1 > 0) delta -= (taken ? ppl1 : ppl1 * 0.25) * rate * trace;
+          if (pam > 0) {
+            delta -= (taken ? 0 : pam * 0.5) * rate * trace;
+            if (taken) delta += pam * rate * 0.45 * trace;
+          }
+
+          const current = readWeight(m);
+          const recovered = current + recovery * (baseline - current);
+          writeWeight(m, clamp(recovered + delta, 0.01, 2.0));
+        }
+      };
+
+      for (let k = 0; k < this.KC_BASE_COUNT; k++) {
+        const pre = this.kcActivations[k];
+        if (pre < 0.01) continue;
+        const rowBase = k * this.MBON_COUNT;
+        applyToRow(
+          pre,
+          m => this.kcToMbonWeights[rowBase + m],
+          (m, v) => { this.kcToMbonWeights[rowBase + m] = v; },
+          rowBase
+        );
+      }
+
+      for (let b = 0; b < this.bornNeurons.length; b++) {
+        const neuron = this.bornNeurons[b];
+        const pre = neuron.activation;
+        if (pre < 0.01) continue;
+        applyToRow(pre, m => neuron.mbonWeights[m], (m, v) => { neuron.mbonWeights[m] = v; }, -1);
       }
     }
 
@@ -852,9 +1165,15 @@
   // Interconnects 16 specialized fly brains with 16x16x4 commissural bridges (1024 synapses)
   // -------------------------------------------------------------
   class SixteenFlyBrainSyncytium {
-    constructor(worldSeed = 42) {
+    /**
+     * @param {number|string} worldSeed
+     * @param {object|string|null} [config] - mechanism selection, or the string
+     *   "legacy" for the pre-upgrade circuit models. See DEFAULT_CONFIG.
+     */
+    constructor(worldSeed = 42, config = null) {
       this.worldSeed = worldSeed;
       this.prng = new MulberryPRNG(worldSeed);
+      this.config = resolveConfig(config);
 
       // 16 Specialized biological roles (grounded in malecns and Central Complex connectomics)
       this.roles = [
@@ -879,7 +1198,7 @@
       this.brainCount = 16;
       this.brains = [];
       for (let i = 0; i < this.brainCount; i++) {
-        this.brains.push(new DrosophilaBrain(i, this.roles[i]));
+        this.brains.push(new DrosophilaBrain(i, this.roles[i], this.config));
       }
 
       // Forked so neurogenesis draws cannot shift any other seeded stream.
@@ -890,6 +1209,7 @@
       this.lastEstimatedValue = 0;
       this.tdGamma = 0.85;
       this.lastRPE = 0;
+      this.lastActionIndex = -1;
       this.syncytiumSteps = 0;
       this.isPretrained = false;
       this.pretrainingEpochs = 0;
@@ -1086,14 +1406,31 @@
         }
       }
 
-      // 3. Central Complex Compass Ring Synchronization
-      let meanHeading = 0;
-      for (let i = 0; i < this.brainCount; i++) {
-        meanHeading += this.brains[i].compassHeading;
-      }
-      meanHeading /= this.brainCount;
-      for (let i = 0; i < this.brainCount; i++) {
-        this.brains[i].compassHeading = 0.85 * this.brains[i].compassHeading + 0.15 * meanHeading;
+      // 3. Heading distribution.
+      //
+      // Attractor mode broadcasts the navigator's decoded heading, because the
+      // compass lives in the Central Complex and other neuropils read it.
+      // Averaging scalars from 16 independent integrators, as legacy mode does,
+      // also wraps incorrectly near 0/2pi -- a mean of 0.01 and 6.27 lands at
+      // pi, pointing backwards.
+      if (this.config.compass === "attractor") {
+        const reference = this.brains[1].compassHeading;
+        for (let i = 0; i < this.brainCount; i++) {
+          if (i === 1) continue;
+          const brain = this.brains[i];
+          brain.compassHeading = wrapAngle(
+            brain.compassHeading + 0.6 * angleDelta(reference, brain.compassHeading)
+          );
+        }
+      } else {
+        let meanHeading = 0;
+        for (let i = 0; i < this.brainCount; i++) {
+          meanHeading += this.brains[i].compassHeading;
+        }
+        meanHeading /= this.brainCount;
+        for (let i = 0; i < this.brainCount; i++) {
+          this.brains[i].compassHeading = 0.85 * this.brains[i].compassHeading + 0.15 * meanHeading;
+        }
       }
 
       // 4. Consensus Motor Synthesis (16 Brains)
@@ -1128,6 +1465,13 @@
       }
 
       this.lastEstimatedValue = (consensusLogits[0] + consensusLogits[1] + consensusLogits[2] + consensusLogits[3]) / 4;
+
+      // The channel the consensus favoured. Dopamine-gated depression needs it
+      // to know which KC->MBON synapses coincided with the outcome.
+      let chosen = 0;
+      for (let a = 1; a < 4; a++) if (consensusLogits[a] > consensusLogits[chosen]) chosen = a;
+      this.lastActionIndex = chosen;
+      for (let i = 0; i < this.brainCount; i++) this.brains[i].lastActionIndex = chosen;
 
       if (egoId !== null && egoId !== undefined) this.saveEgo(egoId);
       if (this._tickAuto) {
@@ -1228,7 +1572,20 @@
         loomingVelocity: this.brains[2].loomingVelocity || 0,
         circadianClock: this.circadianClock,
         circadianPhase: this.circadianClock < this.circadianPeriod / 2 ? "DAY" : "NIGHT",
-        pdfArousal: this.pdfArousal
+        pdfArousal: this.pdfArousal,
+        tick: this.tickCount,
+        activeEgoId: this.activeEgoId,
+        compassMode: this.config.compass,
+        mbInhibition: this.config.mbInhibition,
+        plasticityRule: this.config.plasticity,
+        // Population-vector length of the E-PG bump: 1 is a sharp, confident
+        // heading estimate, 0 a flat ring with no heading at all.
+        ringCertainty: this.brains[1].ringCertainty,
+        ringAmplitude: this.brains[1].ringAmplitude,
+        epgRing: Array.from(this.brains[1].epgRing),
+        kcSparsity: this.brains[3].kcSparsity,
+        aplActivity: this.brains[3].aplActivity,
+        lastActionIndex: this.lastActionIndex
       };
     }
 
@@ -1672,12 +2029,50 @@
   // Resumable State Serialization & Persistence Engine
   // -------------------------------------------------------------
   class FlyBrainStateSerializer {
-    static STORAGE_KEY = "diamond_sim_fly_brain_state_v6";
+    static STORAGE_KEY = "diamond_sim_fly_brain_state_v7";
+
+    /** Per-fly registers, as plain arrays, for the JSON document. */
+    static _egoBankToJson(sync) {
+      const bank = {};
+      for (const [egoId, record] of sync.egoStates.entries()) {
+        bank[egoId] = record.map(ego => ({
+          scalars: Object.assign({}, ego.scalars),
+          arrays: Object.fromEntries(Object.entries(ego.arrays).map(([k, v]) => [k, Array.from(v)])),
+          born: Array.from(ego.born || [])
+        }));
+      }
+      return bank;
+    }
+
+    static _egoBankFromJson(sync, bank) {
+      if (!bank || typeof bank !== "object") return;
+      sync.egoStates.clear();
+      for (const egoId of Object.keys(bank)) {
+        const saved = bank[egoId];
+        if (!Array.isArray(saved)) continue;
+        const record = sync._egoRecord(egoId);
+        for (let i = 0; i < Math.min(record.length, saved.length); i++) {
+          const src = saved[i];
+          if (!src) continue;
+          if (src.scalars) Object.assign(record[i].scalars, src.scalars);
+          if (src.arrays) {
+            for (const key of Object.keys(src.arrays)) {
+              record[i].arrays[key] = Float32Array.from(src.arrays[key]);
+            }
+          }
+          if (Array.isArray(src.born)) record[i].born = Float32Array.from(src.born);
+        }
+      }
+    }
 
     static serialize(graft, extraAgentData = {}) {
       const sync = graft.syncytium;
       const stateObj = {
-        version: "6.0.0",
+        version: "7.0.0",
+        config: Object.assign({}, sync.config),
+        tickCount: sync.tickCount || 0,
+        lastActionIndex: sync.lastActionIndex,
+        egoStates: FlyBrainStateSerializer._egoBankToJson(sync),
         timestamp: Date.now(),
         worldSeed: sync.worldSeed,
         prngDrawCount: sync.prng ? sync.prng.drawCount : 0,
@@ -1734,6 +2129,12 @@
           kcToMbonWeights: Array.from(b.kcToMbonWeights),
           eligibilityTraces: Array.from(b.eligibilityTraces),
           opticMotionFlow: Array.from(b.opticMotionFlow),
+          epgRing: Array.from(b.epgRing),
+          ringAmplitude: b.ringAmplitude,
+          ringCertainty: b.ringCertainty,
+          aplActivity: b.aplActivity,
+          kcSparsity: b.kcSparsity,
+          lastActionIndex: b.lastActionIndex,
           bornNeurons: b.bornNeurons.map(n => ({
             id: n.id,
             age: n.age,
@@ -1794,6 +2195,14 @@
       sync.neurogenesis.birthCounter = data.neurogenesisBirthCounter || 0;
 
       sync.syncytiumSteps = data.syncytiumSteps || 0;
+      sync.tickCount = data.tickCount !== undefined ? data.tickCount : (data.syncytiumSteps || 0);
+      if (data.lastActionIndex !== undefined) sync.lastActionIndex = data.lastActionIndex;
+      if (data.config) {
+        // Mechanism selection is part of the run: a file saved from the legacy
+        // circuit must resume on the legacy circuit.
+        sync.config = resolveConfig(data.config);
+        for (const brain of sync.brains) brain.config = sync.config;
+      }
       if (data.circadianClock !== undefined) sync.circadianClock = data.circadianClock;
       if (data.handshakeEvents !== undefined) graft.handshakeEvents = data.handshakeEvents;
       sync.isPretrained = data.isPretrained || false;
@@ -1838,6 +2247,14 @@
         if (bData.kcToMbonWeights) brain.kcToMbonWeights.set(bData.kcToMbonWeights);
         if (bData.eligibilityTraces) brain.eligibilityTraces.set(bData.eligibilityTraces);
         if (bData.opticMotionFlow && brain.opticMotionFlow) brain.opticMotionFlow.set(bData.opticMotionFlow);
+        if (bData.epgRing && brain.epgRing && brain.epgRing.length === bData.epgRing.length) {
+          brain.epgRing.set(bData.epgRing);
+        }
+        if (bData.ringAmplitude !== undefined) brain.ringAmplitude = bData.ringAmplitude;
+        if (bData.ringCertainty !== undefined) brain.ringCertainty = bData.ringCertainty;
+        if (bData.aplActivity !== undefined) brain.aplActivity = bData.aplActivity;
+        if (bData.kcSparsity !== undefined) brain.kcSparsity = bData.kcSparsity;
+        if (bData.lastActionIndex !== undefined) brain.lastActionIndex = bData.lastActionIndex;
 
         brain.bornNeurons = (bData.bornNeurons || []).map(n => ({
           id: n.id,
@@ -1848,6 +2265,8 @@
           mbonWeights: new Float32Array(n.mbonWeights)
         }));
       }
+
+      FlyBrainStateSerializer._egoBankFromJson(sync, data.egoStates);
 
       return data.extraAgentData || {};
     }
@@ -1905,6 +2324,11 @@
   // Public Exports
   // -------------------------------------------------------------
   return {
+    DEFAULT_CONFIG,
+    LEGACY_CONFIG,
+    resolveConfig,
+    angleDelta,
+    wrapAngle,
     MulberryPRNG,
     ChemicalFieldGrid,
     DrosophilaBrain,
