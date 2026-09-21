@@ -1989,8 +1989,31 @@
 
     setCouplingStrength(strength) {
       if (!Number.isFinite(strength) || strength < 0 || strength > 2) return false;
+      const previous = this.config.couplingStrength;
       this.config.couplingStrength = strength;
-      this.commissuralWeights = this._initCommissuralWeights();
+      if (previous > 0) {
+        for (let i = 0; i < this.commissuralWeights.length; i++) this.commissuralWeights[i] *= strength / previous;
+      } else this.commissuralWeights = this._initCommissuralWeights();
+      return true;
+    }
+
+    /** Edit one directed projection while conserving its destination's input budget. */
+    adjustCommissuralWeight(src, dst, channel, delta) {
+      const n = this.brainCount, strength = this.config.couplingStrength;
+      if (![src, dst, channel].every(Number.isInteger) || src < 0 || src >= n || dst < 0 || dst >= n
+        || src === dst || channel < -1 || channel > 3 || !Number.isFinite(delta) || strength <= 0) return false;
+      for (const action of channel === -1 ? [0, 1, 2, 3] : [channel]) {
+        const index = (src * n + dst) * 4 + action;
+        const next = clamp(this.commissuralWeights[index] + delta, 0, strength);
+        let remaining = 0;
+        for (let other = 0; other < n; other++) if (other !== src && other !== dst) remaining += this.commissuralWeights[(other * n + dst) * 4 + action];
+        this.commissuralWeights[index] = next;
+        for (let other = 0; other < n; other++) {
+          if (other === src || other === dst) continue;
+          const i = (other * n + dst) * 4 + action;
+          this.commissuralWeights[i] = remaining > 0 ? this.commissuralWeights[i] * (strength - next) / remaining : (strength - next) / (n - 2);
+        }
+      }
       return true;
     }
 

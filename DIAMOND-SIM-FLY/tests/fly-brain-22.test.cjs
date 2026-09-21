@@ -6,6 +6,25 @@ const {
 } = require('../src/fly-brain-engine.js');
 
 const obs = (x = 0.5, y = 0.5, threat = 0.1) => [x, y, 0.25, threat, 0.65, 0.5, 0, 1, 1, 0, 0, 0, 0.2, 0.1];
+
+test('matrix edits conserve normalized input and remain loadable', () => {
+  const network = new TwentyTwoFlyBrainSyncytium(47);
+  const graft = new MultiAgentGraphGraft(network);
+  assert.equal(network.adjustCommissuralWeight(0, 1, -1, 0.05), true);
+  assert.equal(network.adjustCommissuralWeight(2, 1, 2, -100), true);
+  assert.equal(network.adjustCommissuralWeight(1, 1, 0, 1), false);
+  const before = network.commissuralWeights[(0 * 22 + 1) * 4];
+  network.setCouplingStrength(1.6);
+  assert.ok(Math.abs(network.commissuralWeights[4] - before * 2) < 1e-7);
+  for (let dst = 0; dst < 22; dst++) for (let action = 0; action < 4; action++) {
+    let sum = 0;
+    for (let src = 0; src < 22; src++) sum += network.commissuralWeights[(src * 22 + dst) * 4 + action];
+    assert.ok(Math.abs(sum - 1.6) < 1e-6);
+  }
+  const restored = new MultiAgentGraphGraft(new TwentyTwoFlyBrainSyncytium(47));
+  FlyBrainStateSerializer.deserialize(restored, FlyBrainStateSerializer.serialize(graft));
+  assert.deepEqual(restored.syncytium.commissuralWeights, network.commissuralWeights);
+});
 const environment = () => ({
   gridSize: 12, agent1X: 2, agent1Y: 3, agent2X: 8, agent2Y: 7, agent3X: 5, agent3Y: 8,
   agent1Energy: 100, agent2Energy: 100, agent3Energy: 100,

@@ -56,6 +56,11 @@ fs.mkdirSync(out, {recursive: true});
     await page.locator('#connectomeCanvas').screenshot({path: path.join(out, 'graph-dense.png')});
     await page.click('#btnMatrix');
     check('matrix displays 22 rows and columns', (await page.locator('#matrixTitle').textContent()).includes('22'));
+    check('matrix edit remains normalized and snapshot-loadable', await page.evaluate(() => {
+      tweakSynapse(0, 1, 0.05);
+      const save = flyLab.serialize();
+      return flyLab.restore(save);
+    }));
     await page.screenshot({path: path.join(out, 'matrix.png')});
     await page.evaluate(() => closeMatrixModal());
     check('saved world resumes exact future including ecology', await page.evaluate(() => {
@@ -71,7 +76,13 @@ fs.mkdirSync(out, {recursive: true});
     check('invalid snapshot leaves world intact', await page.evaluate(() => {const s=JSON.parse(flyLab.serialize());delete s.timestamp;return JSON.stringify(s);}) === beforeInvalid);
     await page.selectOption('#brainMode', '16');
     check('16-module baseline is still selectable', await page.evaluate(() => flyLab.syncytium.brainCount === 16));
+    check('fixed baseline coupling is visibly disabled', await page.locator('#couplingStrength').isDisabled());
     await page.selectOption('#brainMode', '22');
+    check('zero regrowth leaves an exhausted world empty', await page.evaluate(() => {
+      flyLab.climate.setVariable('resourceRegrowth', 0);flyLab.env.diamonds=[];
+      flyLab.advance(15);return flyLab.env.diamonds.length===0;
+    }));
+    await page.evaluate(() => flyLab.reset());
     await page.evaluate(() => flyLab.advance(50));
     await page.screenshot({path: path.join(out, 'desktop.png'), fullPage: true});
     await page.setViewportSize({width: 390, height: 844});

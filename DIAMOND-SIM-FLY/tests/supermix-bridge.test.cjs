@@ -208,7 +208,7 @@ test('native adapter uses a stateless single-model bounded request and exact nam
   const payload = service.calls[2].body;
   assert.equal(payload.model, 'v91-C-control');
   assert.deepEqual(payload.models, ['v91-C-control']);
-  assert.equal(payload.max_new_tokens, 64);
+  assert.equal(payload.max_new_tokens, 48);
   assert.equal(payload.check, false);
   assert.equal(payload.mode, 'greedy');
   assert.equal(payload.session_id, undefined);

@@ -202,14 +202,14 @@ function createBridge(options = {}) {
   const now = options.now || Date.now;
   const cacheMs = options.cacheMs ?? 10000;
   const minAdviceIntervalMs = options.minAdviceIntervalMs ?? 30000;
-  const timeoutMs = options.timeoutMs ?? 3500;
+  const timeoutMs = options.timeoutMs ?? (adapter === 'native' ? 12000 : 3500);
   const healthTimeoutMs = options.healthTimeoutMs ?? 1500;
   let cache = null, cachedAt = -Infinity, pendingStatus = null, inferenceReady = false;
   let failures = 0, retryAt = 0, lastAdvice = -Infinity, advicePending = false;
   let lastAdviceError = null;
   const safety = { readOnly: true, minAdviceIntervalMs, maxInfluence: 0.35, maxConcurrentRequests: 1,
     startsProcesses: false, changesTraining: false, residencyCheck: adapter === 'native' ? 'best-effort' : 'no-load-contract',
-    loadsCheckpoints: adapter === 'native' ? 'server-managed-residency-race' : false, maxNewTokens: 64 };
+    loadsCheckpoints: adapter === 'native' ? 'server-managed-residency-race' : false, maxNewTokens: 48 };
 
   function failure() { inferenceReady = false; if (++failures >= 3) retryAt = now() + 60000; cache = null; }
   async function verifyService() {
@@ -263,7 +263,7 @@ function createBridge(options = {}) {
         const example = Object.fromEntries(Object.keys(observation.agents).map(id => [id, 'up']));
         const message = 'Choose a direction for each simulation agent to find resources and avoid danger. Return ONLY JSON mapping each agent to up, down, left, or right, like ' + JSON.stringify(example) + '. Observation: ' + JSON.stringify(observation);
         if (message.length > 4000) throw new BridgeError('invalid_observation', 'Observation is too large for the native model prompt.', 400);
-        const response = await requestJSON(endpoint, '/api/compare', 'POST', { model, models: [model], message, max_new_tokens: 64, check: false, mode: 'greedy' }, timeoutMs);
+        const response = await requestJSON(endpoint, '/api/compare', 'POST', { model, models: [model], message, max_new_tokens: 48, check: false, mode: 'greedy' }, timeoutMs);
         accepted = parseNativeReply(response, observation, model);
       } else {
         const payload = await requestJSON(endpoint, '/advice', 'POST', { schemaVersion: SCHEMA_VERSION, model, noLoad: true, actionOrder: ['up', 'down', 'left', 'right'], observation }, timeoutMs);

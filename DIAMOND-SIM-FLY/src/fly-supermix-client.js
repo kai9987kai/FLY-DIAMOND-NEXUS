@@ -57,11 +57,12 @@
       mode.textContent = ready ? 'Connected · verified ' + status.inference.verifiedModel :
         status.mode === 'telemetry-only' ? 'Connected · telemetry only' : 'Model unavailable';
       const t = status.training || {}, metrics = t.metrics || {};
-      training.textContent = [(status.targetModel || 'Supermix') + ': ' + (t.state || 'unverified'), t.message,
+      training.textContent = [(t.model || status.targetModel || 'Supermix') + ': ' + (t.state || 'unverified'), t.message,
         Number.isFinite(metrics.step) ? 'Step ' + metrics.step + (Number.isFinite(metrics.totalSteps) ? '/' + metrics.totalSteps : '') : '',
         Number.isFinite(metrics.loss) ? 'Loss ' + metrics.loss.toFixed(4) : '',
         !ready ? status.inference?.reason : ''].filter(Boolean).join(' · ');
       if (!ready) adviceText.textContent = 'No model advice applied. Training files and running jobs remain untouched.';
+      else if (status.inference.lastAdviceError) adviceText.textContent = status.inference.lastAdviceError.reason;
       const now = performance.now();
       if (ready && enabled.checked && root.flyLab.running && now - lastAdvice >= Math.max(10000, status.safety?.minAdviceIntervalMs || 10000)) {
         lastAdvice = now;
@@ -83,8 +84,8 @@
         } else adviceText.textContent = 'Advice rejected by the graft; local policy continues.';
       }
     } catch (error) {
-      mode.textContent = 'Bridge unavailable · local agents continue';
-      training.textContent = error.name === 'AbortError' ? 'Connection timed out.' : error.message;
+      mode.textContent = status?.inference?.ready ? 'Connected · advice unavailable' : 'Bridge unavailable · local agents continue';
+      adviceText.textContent = error.name === 'AbortError' ? 'Connection timed out; local agents continue.' : error.message;
     } finally { busy = false; refresh.disabled = false; }
   }
   enabled.addEventListener('change', () => {

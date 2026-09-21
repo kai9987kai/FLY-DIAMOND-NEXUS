@@ -1892,6 +1892,12 @@ function clearMatrixTooltip() {
 
 function tweakSynapse(src, dst, delta) {
   if (!syncytium) return;
+  if (typeof syncytium.adjustCommissuralWeight === 'function') {
+    syncytium.adjustCommissuralWeight(src, dst, matrixChannel, delta);
+    renderMatrixGrid();drawConnectome();
+    logEvent(`Adjusted B${src}→B${dst}; normalized the destination input budget.`, 'ev-peer');
+    return;
+  }
   const weights = syncytium.commissuralWeights;
   if (matrixChannel === -1) {
     for (let a = 0; a < 4; a++) {
@@ -1942,7 +1948,7 @@ async function startBenchmarkExecution() {
   exportBtn.disabled = true;
   progress.value = 0;
   progressText.textContent = "0%";
-  statusLabel.textContent = "Running benchmark evaluation across 4 arms…";
+  statusLabel.textContent = "Running paired benchmark evaluation…";
   scoreboard.style.display = 'none';
 
   try {
@@ -1970,7 +1976,7 @@ async function startBenchmarkExecution() {
     exportBtn.disabled = false;
 
     renderBenchmarkScoreboard(report);
-    logEvent(`🏆 Benchmark complete: 16-Brain Win Rate = ${report.arms.find(a => a.arm.includes('16B'))?.winRate || 0}%`, 'ev-milestone');
+    logEvent(`🏆 Benchmark complete: 22-Brain Win Share = ${report.arms.find(a => a.arm === 'Syncytium_22B')?.winRate || 0}%`, 'ev-milestone');
   } catch (err) {
     statusLabel.textContent = `Benchmark error: ${err.message}`;
     console.error(err);
